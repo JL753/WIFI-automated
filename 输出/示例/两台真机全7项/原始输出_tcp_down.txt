@@ -1,0 +1,34 @@
+Connecting to host 10.23.160.19, port 5201
+Reverse mode, remote host 10.23.160.19 is sending
+[  4] local 10.23.160.23 port 36964 connected to 10.23.160.19 port 5201
+[  6] local 10.23.160.23 port 36976 connected to 10.23.160.19 port 5201
+[ ID] Interval           Transfer     Bitrate
+[  4]   0.00-1.00   sec  7.25 MBytes  60.7 Mbits/sec                  
+[  6]   0.00-1.00   sec  7.00 MBytes  58.6 Mbits/sec                  
+[SUM]   0.00-1.00   sec  14.2 MBytes   119 Mbits/sec                  
+- - - - - - - - - - - - - - - - - - - - - - - - -
+[  4]   1.00-2.00   sec  8.88 MBytes  74.5 Mbits/sec                  
+[  6]   1.00-2.00   sec  9.00 MBytes  75.5 Mbits/sec                  
+[SUM]   1.00-2.00   sec  17.9 MBytes   150 Mbits/sec                  
+- - - - - - - - - - - - - - - - - - - - - - - - -
+[  4]   2.00-3.00   sec  9.88 MBytes  82.8 Mbits/sec                  
+[  6]   2.00-3.00   sec  9.62 MBytes  80.7 Mbits/sec                  
+[SUM]   2.00-3.00   sec  19.5 MBytes   164 Mbits/sec                  
+- - - - - - - - - - - - - - - - - - - - - - - - -
+[  4]   3.00-4.00   sec  9.38 MBytes  78.6 Mbits/sec                  
+[  6]   3.00-4.00   sec  9.38 MBytes  78.6 Mbits/sec                  
+[SUM]   3.00-4.00   sec  18.8 MBytes   157 Mbits/sec                  
+- - - - - - - - - - - - - - - - - - - - - - - - -
+[  4]   4.00-5.00   sec  10.2 MBytes  86.0 Mbits/sec                  
+[  6]   4.00-5.00   sec  10.1 MBytes  84.9 Mbits/sec                  
+[SUM]   4.00-5.00   sec  20.4 MBytes   171 Mbits/sec                  
+- - - - - - - - - - - - - - - - - - - - - - - - -
+[ ID] Interval           Transfer     Bitrate         Retr
+[  4]   0.00-5.01   sec  52.1 MBytes  87.3 Mbits/sec    0            sender
+[  4]   0.00-5.00   sec  45.6 MBytes  76.5 Mbits/sec                  receiver
+[  6]   0.00-5.01   sec  49.9 MBytes  83.5 Mbits/sec    0            sender
+[  6]   0.00-5.00   sec  45.1 MBytes  75.7 Mbits/sec                  receiver
+[SUM]   0.00-5.01   sec   102 MBytes   171 Mbits/sec    0             sender
+[SUM]   0.00-5.00   sec  90.8 MBytes   152 Mbits/sec                  receiver
+
+iperf Done.

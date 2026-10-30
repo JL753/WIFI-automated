@@ -1,0 +1,14 @@
+Connecting to host 10.23.160.19, port 5201
+[  4] local 10.23.160.23 port 39824 connected to 10.23.160.19 port 5201
+[ ID] Interval           Transfer     Bitrate         Total Datagrams
+[  4]   0.00-1.00   sec  9.55 MBytes  80.0 Mbits/sec  6914  
+[  4]   1.00-2.00   sec  9.54 MBytes  80.0 Mbits/sec  6906  
+[  4]   2.00-3.00   sec  9.54 MBytes  80.0 Mbits/sec  6906  
+[  4]   3.00-4.00   sec  9.53 MBytes  80.0 Mbits/sec  6906  
+[  4]   4.00-5.00   sec  9.54 MBytes  79.9 Mbits/sec  6906  
+- - - - - - - - - - - - - - - - - - - - - - - - -
+[ ID] Interval           Transfer     Bitrate         Jitter    Lost/Total Datagrams
+[  4]   0.00-5.00   sec  47.7 MBytes  80.0 Mbits/sec  0.000 ms  0/34538 (0%)  sender
+[  4]   0.00-5.01   sec  47.7 MBytes  79.8 Mbits/sec  0.139 ms  0/34538 (0%)  receiver
+
+iperf Done.

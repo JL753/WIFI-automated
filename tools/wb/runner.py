@@ -12,6 +12,7 @@ import threading
 import datetime
 
 from . import adbkit as ad
+from . import paths
 from . import devinfo as di
 from . import iperf as ip
 from . import report as rp
@@ -414,8 +415,7 @@ def run_plan(ctx, infos, items):
 
     # ---- 1. 确保两端都有 iperf3
     need_traffic = any(t != "link_snapshot" for t in items)
-    local_bin = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(
-        os.path.abspath(__file__)))), "bin", ip.LOCAL_BIN_NAME)
+    local_bin = os.path.join(paths.bin_dir(), ip.LOCAL_BIN_NAME)
 
     if need_traffic:
         ui.rule("准备 iperf3 二进制")
@@ -629,8 +629,7 @@ def _run_pc_tunnel(ctx, duration, streams):
     ui.rule("PC 参与的隧道测试")
     ui.line("  注意：这条链路走的是 USB 数据线，测出来是【USB 隧道带宽】，不是 WiFi 带宽")
     ui.line("")
-    pc_exe = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(
-        os.path.abspath(__file__)))), "bin", "win", "iperf3.exe")
+    pc_exe = paths.pc_iperf()
     if not os.path.exists(pc_exe):
         ctx.note("PC 端 iperf3.exe 不存在：%s" % pc_exe)
         ui.err("找不到 PC 端 iperf3：%s" % pc_exe)

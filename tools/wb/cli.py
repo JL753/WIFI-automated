@@ -23,14 +23,15 @@ if hasattr(sys.stdout, "reconfigure") and not sys.stdout.isatty():
         pass
 
 from . import adbkit as ad
+from . import paths
+from . import config as cfg
+from . import pack
 from . import devinfo as di
 from . import iperf as ip
 from . import report as rp
 from . import runner as rn
 
-HERE = os.path.dirname(os.path.abspath(__file__))
-ROOT = os.path.dirname(os.path.dirname(HERE))
-DEFAULT_OUT = os.path.join(ROOT, "输出")
+DEFAULT_OUT = paths.out_dir()
 
 
 def banner():
@@ -160,6 +161,27 @@ class Opts(object):
         self.out = DEFAULT_OUT
         self.server = None
         self.client = None
+        self._apply_saved()
+
+    def _apply_saved(self):
+        """用上次跑过的参数覆盖默认值。第一次运行没有 配置.json，保持默认。"""
+        saved = cfg.load()
+        for attr in ("duration", "streams", "reverse", "mark", "udp_bw",
+                     "long_duration", "screen_seg", "screen_rounds", "port"):
+            if attr not in saved:
+                continue
+            cur = getattr(self, attr)
+            val = saved[attr]
+            try:
+                if isinstance(cur, bool):
+                    if isinstance(val, bool):
+                        setattr(self, attr, val)
+                elif isinstance(cur, int):
+                    setattr(self, attr, int(val))
+                elif isinstance(cur, str):
+                    setattr(self, attr, str(val))
+            except (TypeError, ValueError):
+                pass
 
     def as_dict(self):
         return dict(self.__dict__)
@@ -310,6 +332,14 @@ def save_all(ctx, items, devices, opts):
         except Exception:
             size = 0
         print("      %-30s %9d 字节" % (os.path.basename(f), size))
+
+    zip_path, info = pack.zip_run_dir(out_dir)
+    if zip_path:
+        print("    已打包成 zip（方便拷给别人）：")
+        print("      " + zip_path)
+        print("      %d 个文件，%s" % (info, pack.human_size(os.path.getsize(zip_path))))
+    else:
+        print("    （自动打包 zip 失败，不影响上面的结果文件：%s）" % info)
     return out_dir
 
 
@@ -401,6 +431,13 @@ def _resolve_roles(pairs, o):
     return pick_two(pairs), 0
 
 
+def _remember_params(o):
+    """记住这次用的参数，下次打开就是这一套。写盘失败不打扰用户。"""
+    cfg.update(duration=o.duration, streams=o.streams, reverse=o.reverse,
+               mark=o.mark, udp_bw=o.udp_bw, long_duration=o.long_duration,
+               screen_seg=o.screen_seg, screen_rounds=o.screen_rounds, port=o.port)
+
+
 def _execute(pairs, items, o, srv, cli):
     devs = [p[1] for p in pairs if p[1]]
     ui = rn.UI()
@@ -421,11 +458,17 @@ def _execute(pairs, items, o, srv, cli):
         print("")
         print("  [错误] 测试中断")
         print("  原因  ：%s" % exc)
-        print("  处理办法：按上面的提示排查后重跑；完整堆栈见下方")
-        traceback.print_exc()
+        print("  处理办法：按上面的提示排查后重跑")
+        # 已知错误（iperf/adb/流程校验）自己就带三段式说明，再打堆栈只会盖住关键信息；
+        # 只有设了 WIFITPUT_DEBUG 才输出，方便排查真正的代码缺陷。
+        if os.environ.get("WIFITPUT_DEBUG"):
+            traceback.print_exc()
     finally:
         ui.stop_marker()
-    if ctx.records or ctx.results:
+    _remember_params(o)
+    # 链路质量快照本来就不产生流量记录，但它采集到的设备信息就是结果，
+    # 不落盘的话「只选快照」会得到一个空目录都没有的结果。
+    if ctx.records or ctx.results or "link_snapshot" in items:
         try:
             save_all(ctx, items, devs, o)
         except Exception as exc:
@@ -588,6 +631,7 @@ def main(argv=None):
         print("")
         print("  [错误] 工具异常退出")
         print("  原因  ：%s" % exc)
-        print("  处理办法：把下面的堆栈发给开发者")
-        traceback.print_exc()
+        print("  处理办法：按上面的提示排查；若看不出原因，把这一屏截图发给开发者")
+        if os.environ.get("WIFITPUT_DEBUG"):
+            traceback.print_exc()
         return 1

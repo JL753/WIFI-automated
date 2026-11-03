@@ -1,5 +1,6 @@
 __pycache__/
-*.py[cod]
+*.pyc
+*.pyo
 *.log
 
 # PySide6 约 225 MB，太大不进仓库；跑 启动.bat 前需重新下载

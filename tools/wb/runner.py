@@ -347,17 +347,19 @@ def _run_one(ctx, test_id, kind, reverse, duration, streams, udp, udp_bw, title,
             ctx.notes.append("[%s] %s" % (test_id, s))
             ui.line("      !!  " + s)
 
+    interval = max(1, int(ctx.opts.get("interval") or 1))
     started = time.time()
     res = ip.run_client(
         ctx.cli_serial, ctx.server_ip, ctx.port,
         duration=duration, streams=streams, reverse=reverse,
-        udp=udp, udp_bw=udp_bw, test_id=test_id,
+        udp=udp, udp_bw=udp_bw, interval=interval, test_id=test_id,
         on_record=on_record, on_raw=on_raw,
     )
     res["test_id"] = test_id
     res["kind"] = kind
     res["params"] = {
         "duration": duration, "streams": streams, "reverse": bool(reverse),
+        "interval": interval,
         "udp": bool(udp), "udp_bw": udp_bw if udp else "",
     }
     res["records_n"] = len(recs)

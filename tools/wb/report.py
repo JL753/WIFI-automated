@@ -713,7 +713,7 @@ def _norm_meta(meta_in):
         m[_ALIAS.get(str(k), str(k))] = v
     # 调用方（cli.save_all）把时长/流数/方向放在 meta["params"] 里，这里摊平
     flat = m.get("params") if isinstance(m.get("params"), dict) else {}
-    for k in ("duration", "streams", "reverse", "udp_bw", "port"):
+    for k in ("duration", "streams", "interval", "reverse", "udp_bw", "port"):
         if m.get(k) in (None, "") and flat.get(k) not in (None, ""):
             m[k] = flat[k]
 
@@ -723,6 +723,7 @@ def _norm_meta(meta_in):
     m["finished_at"] = m.get("finished_at") or m["started_at"]
     m["duration"] = m.get("duration")
     m["streams"] = m.get("streams")
+    m["interval"] = m.get("interval")
     m["reverse"] = m.get("reverse")
     m["udp_bw"] = m.get("udp_bw") or ""
     m["items"] = m.get("items") or []
@@ -890,6 +891,9 @@ def _params_line(test, meta):
     streams = p.get("streams") or meta.get("streams")
     if streams:
         bits.append("%s 流" % _num(streams))
+    iv = p.get("interval") or meta.get("interval")
+    if iv and int(iv) != 1:
+        bits.append("采样 %s 秒" % _num(iv))
     bits.append("反向（-R）" if p.get("reverse") else "正向")
     bits.append(test.get("kind") or "")
     if p.get("udp") and p.get("udp_bw"):
@@ -945,13 +949,22 @@ def _render_test_section(idx, test, meta):
 
     sum_rows = [r for r in recs if str(r.get("stream") or "").upper() == "SUM"]
     multi_sum = len(sum_rows) > 1
+    # 多流时同一秒会有好几行，只显示区间分不清是 #4 还是 #6
+    multi_stream = len({str(r.get("stream") or "") for r in recs
+                        if str(r.get("stream") or "").upper() != "SUM"}) > 1
     rows = []
     for r in recs[:10]:
         row = _detail_row(r)
-        if multi_sum and str(r.get("stream") or "").upper() == "SUM":
+        stream = str(r.get("stream") or "")
+        tags = []
+        if multi_stream and stream.upper() != "SUM":
+            tags.append(stream)
+        if multi_sum and stream.upper() == "SUM":
             role = {"sender": "发送端", "receiver": "接收端"}.get(str(r.get("role") or ""), "")
             if role:
-                row[0] = "%s · %s" % (row[0], role)
+                tags.append(role)
+        if tags:
+            row[0] = "%s · %s" % (row[0], " · ".join(tags))
         rows.append(row)
     unit = st.get("unit") or sender.get("unit") or "Mbits/sec"
     stat_row = [
@@ -1044,12 +1057,18 @@ def _device_rows(devices):
         for a in addrs:
             if isinstance(a, dict) and a.get("ip"):
                 parts.append("%s %s/%s" % (a.get("iface") or "?", a["ip"], _num(a.get("prefix")) or "?"))
+            elif isinstance(a, str) and a.strip():
+                # 外部来源（手机端旧版本）可能只给 "10.0.0.2/24"
+                parts.append(a.strip())
         return " · ".join(parts) or None
 
     rows.append(["IP 地址", *[_cell(_ip(d)) for d in devices]])
 
     def _gw(d):
         r = d.get("default_route") or {}
+        if isinstance(r, str):
+            # 契约是 dict；外部来源可能给 "wlan0 10.0.0.1"，直接原样显示
+            return r.strip() or None
         if not r.get("gw"):
             return None
         return "%s (%s)" % (r.get("gw"), r.get("iface") or "?")
@@ -1131,6 +1150,8 @@ def render_markdown(payload):
         ["结束时间", _cell(_t(meta.get("finished_at")))],
         ["时长参数", _cell(("每轮 %s 秒" % _num(meta.get("duration"))) if meta.get("duration") else None)],
         ["并发流数", _cell(_num(meta.get("streams")) if meta.get("streams") else None)],
+        ["采样间隔", _cell(("%s 秒" % _num(meta.get("interval")))
+                          if meta.get("interval") else None)],
         ["方向", _cell("反向（-R，服务端→客户端）" if meta.get("reverse") else "正向（客户端→服务端）")],
     ]
     if meta.get("udp_bw"):

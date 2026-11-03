@@ -151,6 +151,7 @@ class Opts(object):
     def __init__(self):
         self.duration = 30
         self.streams = 4
+        self.interval = 1
         self.reverse = True
         self.mark = True
         self.udp_bw = "auto"
@@ -166,7 +167,7 @@ class Opts(object):
     def _apply_saved(self):
         """用上次跑过的参数覆盖默认值。第一次运行没有 配置.json，保持默认。"""
         saved = cfg.load()
-        for attr in ("duration", "streams", "reverse", "mark", "udp_bw",
+        for attr in ("duration", "streams", "interval", "reverse", "mark", "udp_bw",
                      "long_duration", "screen_seg", "screen_rounds", "port"):
             if attr not in saved:
                 continue
@@ -191,6 +192,7 @@ def show_params(o):
     print("  当前参数：")
     print("    每项测试时长 : %d 秒" % o.duration)
     print("    并发流数     : %d 条" % o.streams)
+    print("    采样间隔     : %d 秒" % o.interval)
     print("    反向 -R      : %s" % ("开（同时测下行）" if o.reverse else "关（只测上行）"))
     print("    UDP 限速     : %s" % o.udp_bw)
     print("    长稳时长     : %d 秒" % o.long_duration)
@@ -208,12 +210,13 @@ def edit_params(o):
         print("  修改哪一项？（直接回车返回）")
         print("    1  每项测试时长（秒）")
         print("    2  并发流数（1-16）")
-        print("    3  是否做反向 -R 测试")
-        print("    4  UDP 限速（auto 或 50M 这样写）")
-        print("    5  长稳测试时长（秒）")
-        print("    6  亮灭屏每段秒数 / 轮数")
-        print("    7  运行中是否允许按键打点")
-        print("    8  服务端口")
+        print("    3  采样间隔（秒）")
+        print("    4  是否做反向 -R 测试")
+        print("    5  UDP 限速（auto 或 50M 这样写）")
+        print("    6  长稳测试时长（秒）")
+        print("    7  亮灭屏每段秒数 / 轮数")
+        print("    8  运行中是否允许按键打点")
+        print("    9  服务端口")
         c = ask("  序号：", "")
         if not c:
             return
@@ -222,17 +225,19 @@ def edit_params(o):
         elif c == "2":
             o.streams = ask_int("    并发流数（1-16）：", o.streams, 1, 16)
         elif c == "3":
-            o.reverse = ask_yes("    做反向 -R 测试？（y/n，当前 %s）" % ("y" if o.reverse else "n"), o.reverse)
+            o.interval = ask_int("    采样间隔（秒，1-60）：", o.interval, 1, 60)
         elif c == "4":
-            o.udp_bw = ask("    UDP 限速（auto 或 50M）：", o.udp_bw)
+            o.reverse = ask_yes("    做反向 -R 测试？（y/n，当前 %s）" % ("y" if o.reverse else "n"), o.reverse)
         elif c == "5":
-            o.long_duration = ask_int("    长稳测试时长（秒，60-7200）：", o.long_duration, 60, 7200)
+            o.udp_bw = ask("    UDP 限速（auto 或 50M）：", o.udp_bw)
         elif c == "6":
+            o.long_duration = ask_int("    长稳测试时长（秒，60-7200）：", o.long_duration, 60, 7200)
+        elif c == "7":
             o.screen_seg = ask_int("    亮灭屏每段秒数（5-300）：", o.screen_seg, 5, 300)
             o.screen_rounds = ask_int("    亮屏/灭屏各跑几轮（1-10）：", o.screen_rounds, 1, 10)
-        elif c == "7":
-            o.mark = ask_yes("    运行中允许按键打点？（y/n）", o.mark)
         elif c == "8":
+            o.mark = ask_yes("    运行中允许按键打点？（y/n）", o.mark)
+        elif c == "9":
             o.port = ask_int("    服务端口（1024-65535）：", o.port, 1024, 65535)
         else:
             print("      没有这个序号")
@@ -295,7 +300,8 @@ def save_all(ctx, items, devices, opts):
         "finished_at": (getattr(ctx, "finished_at", None) or datetime.datetime.now()).strftime("%Y-%m-%d %H:%M:%S"),
         "items": items,
         "params": {
-            "duration": opts.duration, "streams": opts.streams, "reverse": opts.reverse,
+            "duration": opts.duration, "streams": opts.streams,
+            "interval": opts.interval, "reverse": opts.reverse,
             "udp_bw": opts.udp_bw, "long_duration": opts.long_duration,
             "screen_seg": opts.screen_seg, "screen_rounds": opts.screen_rounds,
             "port": opts.port,
@@ -385,8 +391,8 @@ def cmd_list(args):
 def _apply_args(o, args):
     if not args:
         return
-    for attr in ("duration", "streams", "udp_bw", "long_duration", "out", "port",
-                 "server", "client"):
+    for attr in ("duration", "streams", "interval", "udp_bw", "long_duration", "out",
+                 "port", "server", "client"):
         v = getattr(args, attr, None)
         if v:
             setattr(o, attr, v)
@@ -433,9 +439,10 @@ def _resolve_roles(pairs, o):
 
 def _remember_params(o):
     """记住这次用的参数，下次打开就是这一套。写盘失败不打扰用户。"""
-    cfg.update(duration=o.duration, streams=o.streams, reverse=o.reverse,
-               mark=o.mark, udp_bw=o.udp_bw, long_duration=o.long_duration,
-               screen_seg=o.screen_seg, screen_rounds=o.screen_rounds, port=o.port)
+    cfg.update(duration=o.duration, streams=o.streams, interval=o.interval,
+               reverse=o.reverse, mark=o.mark, udp_bw=o.udp_bw,
+               long_duration=o.long_duration, screen_seg=o.screen_seg,
+               screen_rounds=o.screen_rounds, port=o.port)
 
 
 def _execute(pairs, items, o, srv, cli):
@@ -595,6 +602,8 @@ def build_parser():
                    help="menu=交互菜单（默认）；list=只看设备；run=按参数直接跑")
     p.add_argument("-t", "--duration", type=int, help="每项测试时长（秒）")
     p.add_argument("-P", "--streams", type=int, help="并发流数 1-16")
+    p.add_argument("-I", "--interval", type=int,
+                   help="逐秒采样间隔（秒，默认 1；调大能减少行数）")
     p.add_argument("-R", "--reverse", dest="reverse", action="store_true", default=None,
                    help="同时做反向 -R 测试")
     p.add_argument("--no-reverse", dest="reverse", action="store_false",

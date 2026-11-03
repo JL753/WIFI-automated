@@ -359,9 +359,10 @@ def _pick_error(raw_text, fallback):
 
 # --------------------------------------------------------------------- client
 
-def _client_argv(server_ip, port, duration, streams, reverse, udp, udp_bw):
+def _client_argv(server_ip, port, duration, streams, reverse, udp, udp_bw, interval=1):
     argv = [PHONE_BIN, "-c", str(server_ip), "-p", str(int(port)),
-            "-t", str(int(duration)), "-P", str(int(streams))]
+            "-t", str(int(duration)), "-P", str(int(streams)),
+            "-i", str(max(1, int(interval)))]
     if reverse:
         argv.append("-R")
     if udp:
@@ -371,13 +372,13 @@ def _client_argv(server_ip, port, duration, streams, reverse, udp, udp_bw):
 
 
 def run_client(serial, server_ip, port, *, duration, streams=1, reverse=False,
-               udp=False, udp_bw="50M", test_id="tcp_up",
+               udp=False, udp_bw="50M", interval=1, test_id="tcp_up",
                on_record=None, on_raw=None, log=None):
     """手机上跑 iperf3 客户端，逐行实时回调。返回契约 4.3 规定的 dict。"""
     kind = "UDP" if udp else "TCP"
     safe_id = re.sub(r"[^\w.\-]", "_", str(test_id)) or "run"
     remote = "/data/local/tmp/iperf_%s.txt" % safe_id
-    argv = _client_argv(server_ip, port, duration, streams, reverse, udp, udp_bw)
+    argv = _client_argv(server_ip, port, duration, streams, reverse, udp, udp_bw, interval)
     shell_cmd = "%s 2>&1 | tee %s" % (" ".join(argv), remote)
 
     _log(log, "  --  %s %s" % (kind, " ".join(argv[1:])))

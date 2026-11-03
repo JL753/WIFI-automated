@@ -1,16 +1,28 @@
+# ---- Python ----
 __pycache__/
-*.py[cod]
+*.pyc
+*.pyo
 *.log
 .venv/
 venv/
 
-# 打包产物与本机运行时文件
+# ---- 运行时产物 ----
+配置.json
+配置.json.tmp
+已接收.json
+
+# ---- 构建产物 ----
 _build/
 tools/_buildtools/
 python/
-配置.json
-配置.json.tmp
+.gradle/
+build/
+local.properties
 
-# 测试结果（示例目录要保留）
-输出/*
-!输出/示例/
+# ---- 第三方运行时（体积太大，不进仓库）----
+# PC端工具 的 PySide6 约 215 MB，克隆后请按 使用说明.md 自行安装
+PC端工具/vendor/
+
+# ---- 测试输出（示例目录要保留）----
+*/输出/*
+!*/输出/示例/

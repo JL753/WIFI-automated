@@ -1,0 +1,16 @@
+__pycache__/
+*.py[cod]
+*.log
+.venv/
+venv/
+
+# 打包产物与本机运行时文件
+_build/
+tools/_buildtools/
+python/
+配置.json
+配置.json.tmp
+
+# 测试结果（示例目录要保留）
+输出/*
+!输出/示例/

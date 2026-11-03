@@ -1,0 +1,50 @@
+plugins { id 'com.android.application' }
+
+android {
+    namespace 'com.wifitput.android'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId 'com.wifitput.android'
+        minSdk 26
+        targetSdk 34
+        versionCode 1
+        versionName '1.0'
+    }
+
+    buildTypes {
+        debug {
+            minifyEnabled false
+            signingConfig signingConfigs.debug
+        }
+        release {
+            minifyEnabled false
+            signingConfig signingConfigs.debug
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    // 必须让系统把 libiperf3.so 解压到 nativeLibraryDir —— 那里可执行，
+    // filesDir 是 noexec，解压过去也跑不起来。
+    packaging {
+        jniLibs {
+            useLegacyPackaging = true
+        }
+    }
+
+    lint {
+        abortOnError false
+        checkReleaseBuilds false
+    }
+}
+
+dependencies {
+    // 4.3.0 的 CaptureManager 内部引用了 androidx.core.content.ContextCompat，
+    // 但它的 pom 没把 androidx 标成传递依赖，不显式加进来扫码界面会 ClassNotFoundException 闪退
+    implementation 'androidx.core:core:1.13.1'
+    implementation 'com.journeyapps:zxing-android-embedded:4.3.0'
+}

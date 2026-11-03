@@ -1,0 +1,18 @@
+# 换行符：Windows 脚本必须保持 CRLF，否则双击会乱码/报错
+*.bat   text eol=crlf
+*.cmd   text eol=crlf
+*.ps1   text eol=crlf
+*.java  text eol=lf
+*.py    text eol=lf
+*.gradle text eol=lf
+*.md    text eol=lf
+*.xml   text eol=lf
+
+# 二进制：不要做任何换行转换
+*.apk   binary
+*.exe   binary
+*.dll   binary
+*.so    binary
+*.pyd   binary
+*.zip   binary
+iperf3-arm64v8 binary

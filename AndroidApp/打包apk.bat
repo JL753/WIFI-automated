@@ -1,14 +1,23 @@
 @echo off
 setlocal
 rem Build the WiFi traffic-test APK.
-rem Requires the bundled toolchain under ..\_android_sdk
-rem Usage: pack-apk.bat [output-dir]
+rem Usage: 打包apk.bat [output-dir]
+rem
+rem Toolchain lookup order:
+rem   1) ANDROID_SDK_DIR environment variable
+rem   2) ..\_android_sdk       (workspace layout: WiFiTput-debug\AndroidApp)
+rem   3) ..\..\_android_sdk     (repo layout: AndroidApp checked out at the repo root)
 
 set "HERE=%~dp0"
 set "HERE=%HERE:~0,-1%"
-set "SDK=%HERE%\..\_android_sdk"
+
+set "SDK=%ANDROID_SDK_DIR%"
+if not defined SDK if exist "%HERE%\..\_android_sdk\jdk\bin\java.exe" set "SDK=%HERE%\..\_android_sdk"
+if not defined SDK if exist "%HERE%\..\..\_android_sdk\jdk\bin\java.exe" set "SDK=%HERE%\..\..\_android_sdk"
+if not defined SDK set "SDK=%HERE%\..\_android_sdk"
+
 set "DIST=%~1"
-if "%DIST%"=="" set "DIST=%HERE%..\APK"
+if "%DIST%"=="" set "DIST=%HERE%\APK"
 
 if not exist "%SDK%\jdk\bin\java.exe" (
   echo [ERROR] Java not found: %SDK%\jdk\bin\java.exe

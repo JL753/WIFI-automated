@@ -8,11 +8,11 @@
 | [`PC端工具`](PC端工具) | PC 端接收器：收手机推来的结果，落盘 CSV/JSON/MD 并直接看报告 | Windows + Python 3.8+ | PySide6（需自行安装，见下） |
 | [`WiFi吞吐量测试工具`](WiFi吞吐量测试工具) | 命令行版，7 个测试项合一，自带报告渲染 | Windows + Python 3.8+ | 纯标准库，零依赖 |
 | [`WiFiTput`](WiFiTput) | 上面那个命令行工具打包好的独立 exe | Windows | 什么都不用装，双击即用 |
-<img width="426" height="895" alt="image" src="https://github.com/user-attachments/assets/7223bb1f-cd9a-429f-b07d-32a1b380c647" />
-<img width="430" height="891" alt="image" src="https://github.com/user-attachments/assets/db0c1ac2-a9c0-4a68-a1aa-e38c6785d3a1" />
-<img width="424" height="894" alt="image" src="https://github.com/user-attachments/assets/575f873c-bbee-45f2-ad7d-dd93006391e6" />
-<img width="423" height="892" alt="image" src="https://github.com/user-attachments/assets/f5570ccc-a9e4-4b86-b73f-54469b367734" />
-<img width="1077" height="747" alt="image" src="https://github.com/user-attachments/assets/7bcbfbaa-0a8c-44c2-84b7-a09ee3a8d7a2" />
+<img width="226" height="495" alt="image" src="https://github.com/user-attachments/assets/7223bb1f-cd9a-429f-b07d-32a1b380c647" />
+<img width="230" height="491" alt="image" src="https://github.com/user-attachments/assets/db0c1ac2-a9c0-4a68-a1aa-e38c6785d3a1" />
+<img width="224" height="494" alt="image" src="https://github.com/user-attachments/assets/575f873c-bbee-45f2-ad7d-dd93006391e6" />
+<img width="223" height="492" alt="image" src="https://github.com/user-attachments/assets/f5570ccc-a9e4-4b86-b73f-54469b367734" />
+<img width="577" height="347" alt="image" src="https://github.com/user-attachments/assets/7bcbfbaa-0a8c-44c2-84b7-a09ee3a8d7a2" />
 
 ---
 

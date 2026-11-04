@@ -1,153 +1,146 @@
 package com.wifitput.android.ui;
 
+import android.app.Activity;
 import android.content.Context;
+import android.content.Intent;
+import android.provider.Settings;
 import android.view.View;
-import android.view.ViewGroup;
 import android.widget.Button;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 
-import com.wifitput.android.core.Hotspot;
+import com.wifitput.android.core.Dev;
 
-/** 本机热点面板：这台开热点，另一台当客户端连上来。 */
-class HotspotBox extends LinearLayout implements Hotspot.Cb {
+import org.json.JSONObject;
+
+/**
+ * 系统热点面板（仅热点页）。
+ *
+ * App 里开不出「系统设置里那个热点」：LocalOnlyHotspot 的射频是真的（实测另机能连、能打流），
+ * 但它是 ROLE_SOFTAP_LOCAL_ONLY —— 系统热点开关不会变已开启、不共享外网，
+ * 另一台手机在 WLAN 列表里看到的也不是用户平时那套热点配置。
+ * 所以这里不做开关，只引导去系统设置打开便携式热点，回来检测并显示本机地址。
+ */
+class HotspotBox extends LinearLayout {
 
     private static final String IDLE =
-            "热点未开启。开启后另一台手机在系统 WiFi 列表里连上它，再在「对端地址」里填这台显示的地址。";
-    private static final String TOO_OLD =
-            "系统版本过低，不支持在 App 内开热点（需要 Android 8.0 以上）";
+            "还没检测到本机热点。点「去系统设置开热点」，在系统设置里打开「便携式热点」，"
+                    + "回来后点「重新检测」。";
 
     private final TextView status;
-    private final Hotspot hs;
-    private final boolean usable;
+    private boolean checking;
 
     HotspotBox(Context c) {
         super(c);
         setOrientation(VERTICAL);
-        addView(Ui.cardTitle(c, "本机热点"));
+        addView(Ui.cardTitle(c, "系统热点"));
 
-        boolean sup = false;
-        Hotspot h = null;
-        boolean ok = false;
-        try {
-            sup = Hotspot.supported();
-            h = new Hotspot(c, this);
-            ok = sup;
-        } catch (Throwable t) {
-            h = null;
-            ok = false;
-        }
-        hs = h;
-        usable = ok;
-
-        Button on = Ui.ghost(c, "开启热点", new View.OnClickListener() {
+        Button open = Ui.primary(c, "去系统设置开热点", new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                act(true);
+                openSettings();
             }
         });
-        Button off = Ui.ghost(c, "关闭热点", new View.OnClickListener() {
+        Button recheck = Ui.ghost(c, "重新检测", new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                act(false);
+                refresh();
             }
         });
-
         LinearLayout bar = Ui.row(c);
-        bar.addView(on, weight());
-        bar.addView(off, weight());
+        bar.addView(open, Ui.w(1.35f));
+        Ui.margin(c, open, 0, 0, 8, 0);
+        bar.addView(recheck, Ui.w(1f));
         addView(bar, Ui.fill());
 
-        status = Ui.text(c, IDLE, 14f, Ui.GREY, false);
-        status.setPadding(0, Ui.dp(c, 6), 0, 0);
+        status = Ui.text(c, IDLE, 13f, Ui.GREY, false);
+        status.setPadding(0, Ui.dp(c, 8), 0, 0);
+        status.setLineSpacing(Ui.dp(c, 1), 1f);
         addView(status, Ui.fill());
 
-        if (!usable) {
-            on.setEnabled(false);
-            off.setEnabled(false);
-            setStatus(TOO_OLD, Ui.GREY);
-        }
+        addView(Ui.hint(c, "开热点这台：另一台手机在它的 WLAN 列表里连上这个热点，再回「WiFi」页扫描对端。\n"
+                + "连热点这台：同样去系统设置 → WLAN，选对方的热点名、输密码连上。"));
     }
 
-    private void act(boolean on) {
-        if (!usable || hs == null) {
-            setStatus(TOO_OLD, Ui.GREY);
+    /** 打不开主流设置页时退到无线设置，都不行就把说法打在状态行上。 */
+    private void openSettings() {
+        Context c = getContext();
+        try {
+            // Settings 里没有这个常量的公开字段，只能写字符串（实测可跳转到个人热点页）。
+            start(c, "android.settings.TETHER_SETTINGS");
+            return;
+        } catch (Exception ignored) {
+        }
+        try {
+            start(c, Settings.ACTION_WIRELESS_SETTINGS);
+            return;
+        } catch (Exception ignored) {
+        }
+        setStatus("打不开系统设置。手动进「设置 → 网络 → 便携式热点」打开开关，再回来点「重新检测」。", Ui.RED);
+    }
+
+    private static void start(Context c, String action) {
+        Intent i = new Intent(action);
+        if (!(c instanceof Activity)) {
+            i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        }
+        c.startActivity(i);
+    }
+
+    /** 检测本机热点状态。Dev.collect 那套反射 + 网段推断有点开销，放工作线程。 */
+    void refresh() {
+        if (checking) {
             return;
         }
-        setStatus(on ? "正在开启热点…" : "正在关闭热点…", Ui.GREY);
-        try {
-            if (on) {
-                hs.start();
-            } else {
-                hs.stop();
+        checking = true;
+        setStatus("正在检测本机热点…", Ui.GREY);
+        final Context app = getContext().getApplicationContext();
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                JSONObject h = null;
+                String err = "";
+                try {
+                    h = Dev.hotspot(app);
+                } catch (Throwable t) {
+                    err = String.valueOf(t);
+                }
+                final JSONObject r = h;
+                final String e = err;
+                post(new Runnable() {
+                    @Override
+                    public void run() {
+                        checking = false;
+                        if (r == null) {
+                            setStatus("检测失败：" + e, Ui.RED);
+                        } else {
+                            render(r);
+                        }
+                    }
+                });
             }
-        } catch (Throwable t) {
-            setStatus("操作失败：" + t, Ui.RED);
+        }, "hotspot-check").start();
+    }
+
+    private void render(JSONObject h) {
+        if (!h.optBoolean("on", false)) {
+            setStatus(IDLE, Ui.GREY);
+            return;
         }
+        String ip = h.optString("ip", "");
+        String iface = h.optString("iface", "");
+        String addr;
+        if (ip.isEmpty()) {
+            addr = iface.isEmpty() ? "地址未知" : iface;
+        } else {
+            addr = iface.isEmpty() ? ip : ip + "（" + iface + "）";
+        }
+        setStatus("已检测到本机热点：本机地址 " + addr
+                + "\n另一台连上后在「WiFi」页点「扫描对端」，也可以手工填这个地址。", Ui.GREEN);
     }
 
     private void setStatus(String s, int color) {
         status.setText(s);
         status.setTextColor(color);
-    }
-
-    private static LinearLayout.LayoutParams weight() {
-        return new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
-    }
-
-    private static String nz(String s) {
-        return s == null ? "" : s;
-    }
-
-    private static String lastLine(String msg) {
-        String s = nz(msg).trim();
-        int i = s.lastIndexOf('\n');
-        return i >= 0 ? s.substring(i + 1).trim() : s;
-    }
-
-    @Override
-    public void onLine(final String tag, final String msg) {
-        post(new Runnable() {
-            @Override
-            public void run() {
-                String line = lastLine(msg);
-                setStatus(("" + nz(tag)).trim() + " " + line,
-                        "!!".equals(tag) ? Ui.RED : Ui.GREY);
-            }
-        });
-    }
-
-    @Override
-    public void onState(final boolean on, final String ssid, final String pass, final String ip) {
-        post(new Runnable() {
-            @Override
-            public void run() {
-                if (!on) {
-                    setStatus("热点未开启", Ui.GREY);
-                    return;
-                }
-                setStatus("热点已开启：" + nz(ssid) + "  密码 " + nz(pass)
-                        + "\n本机热点地址 " + nz(ip), Ui.GREEN);
-            }
-        });
-    }
-
-    /** 宿主 onPause / 切 Tab 时调：关掉热点驱动句柄。 */
-    void shutdown() {
-        try {
-            if (hs != null) {
-                hs.close();
-            }
-        } catch (Throwable ignored) {
-            // 已释放时忽略
-        }
-    }
-
-    String ssid() {
-        try {
-            return hs == null ? "" : nz(hs.ssid());
-        } catch (Throwable t) {
-            return "";
-        }
     }
 }

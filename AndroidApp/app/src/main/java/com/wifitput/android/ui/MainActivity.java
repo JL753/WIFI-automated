@@ -218,6 +218,16 @@ public class MainActivity extends Activity {
     }
 
     @Override
+    protected void onResume() {
+        super.onResume();
+        // 用户可能刚去系统设置里把热点开了又回来，回来就重新检测一遍。
+        for (TabPanel p : panels) {
+            p.refreshHotspot();
+        }
+        refreshStatus();
+    }
+
+    @Override
     protected void onPause() {
         super.onPause();
         // 灭屏 / 切后台都会走这里。以前在这里 stopAll()，结果一灭屏热点和 P2P 群组就被拆了，

@@ -31,7 +31,7 @@ public final class QrDialog {
             if (ip == null || ip.trim().isEmpty()) {
                 new AlertDialog.Builder(c)
                         .setTitle("我的地址")
-                        .setMessage("本机还没有可用的 WiFi 地址，先连上 WiFi 或开启热点再来生成二维码。")
+                        .setMessage("本机还没有可用的 WiFi 地址，先完成 P2P 组网或连上 WiFi 再来生成二维码。")
                         .setPositiveButton("确定", null)
                         .show();
                 return;

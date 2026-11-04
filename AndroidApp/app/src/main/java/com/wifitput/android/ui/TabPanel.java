@@ -185,12 +185,13 @@ class TabPanel extends android.widget.ScrollView implements Session.Listener, Ad
         c3.body().addView(row2);
         root.addView(c3);
 
-        // 卡片 4：本机热点 / P2P 组网（只有对应模式才有）
+        // 卡片 4：系统热点引导 / P2P 组网（只有对应模式才有）
         if ("hotspot".equals(mode)) {
             LinearLayout c4 = Ui.card(c, null);
             hs = new HotspotBox(c);
             c4.addView(hs);
             root.addView(c4);
+            hs.refresh();
         } else if ("p2p".equals(mode)) {
             LinearLayout c4 = Ui.card(c, null);
             p2p = new P2pBox(c);
@@ -266,7 +267,8 @@ class TabPanel extends android.widget.ScrollView implements Session.Listener, Ad
 
     private String modeHint() {
         if ("hotspot".equals(mode)) {
-            return "一台开热点，另一台连上这个热点，两个人对着打流。开热点的那台建议当服务端。";
+            return "热点要开在系统设置里（不是 App 里）。先在下面点「去系统设置开热点」打开便携式热点，"
+                    + "另一台连上它，两个人对着打流。开热点的那台建议当服务端。";
         }
         if ("p2p".equals(mode)) {
             return "两台都不接路由器，用 Wi-Fi Direct 直接互联后再打流，适合排除路由器干扰。";
@@ -276,7 +278,7 @@ class TabPanel extends android.widget.ScrollView implements Session.Listener, Ad
 
     private String serveHintText() {
         if ("hotspot".equals(mode)) {
-            return "开热点的这台点「当服务端」，另一台连上热点后点「扫描对端」。";
+            return "开热点的这台点「当服务端」，另一台在系统 WLAN 里连上热点后点「扫描对端」。";
         }
         if ("p2p".equals(mode)) {
             return "先在下面完成 Wi-Fi Direct 组网，再让群主这台点「当服务端」，另一台点「扫描对端」或扫二维码。";
@@ -380,8 +382,12 @@ class TabPanel extends android.widget.ScrollView implements Session.Listener, Ad
         if (p2p != null) {
             p2p.shutdown();
         }
+    }
+
+    /** 从系统设置开完热点回来时重新检测一次。 */
+    void refreshHotspot() {
         if (hs != null) {
-            hs.shutdown();
+            hs.refresh();
         }
     }
 

@@ -250,7 +250,7 @@ public class Dev {
      * 热点状态。dumpsys wifi 在应用进程里被拒（实测 Permission Denial），
      * 只能靠已废弃的 isWifiApEnabled 反射，再按网段特征猜。
      */
-    static JSONObject hotspot(Context ctx) throws JSONException {
+    public static JSONObject hotspot(Context ctx) throws JSONException {
         JSONObject h = new JSONObject();
         boolean on = false;
         try {
@@ -261,22 +261,48 @@ public class Dev {
             on = v instanceof Boolean && (Boolean) v;
         } catch (Exception ignored) {
         }
-        JSONArray a = new JSONArray();
-        String iface = "";
-        JSONObject route = routeInfo(ctx);
-        String dev = route.optString("dev", "");
-        String ip = route.optString("ip", "");
-        // SoftAp 网段：老机型 192.168.43.x，新机型多在 192.168.x.x / 10.x 的 wlan1 上
-        if (!on && !ip.isEmpty() && !ipConnectsToRouter(ctx, dev)) {
-            if (ip.startsWith("192.168.43.") || dev.startsWith("wlan1") || dev.startsWith("ap")) {
+        // 直接扫网卡找 SoftAp：系统热点一开就多出 wlan1 / ap0 这类网卡，
+        // 比看默认路由可靠 —— 热点开着同时连着 WiFi 时，默认路由是 wlan0，看不出热点。
+        String apIface = "";
+        String apIp = "";
+        try {
+            for (NetworkInterface ni : Collections.list(NetworkInterface.getNetworkInterfaces())) {
+                String name = ni.getName();
+                if (!ni.isUp() || ni.isLoopback() || !isApIface(name)) {
+                    continue;
+                }
+                for (InetAddress x : Collections.list(ni.getInetAddresses())) {
+                    if (x instanceof Inet4Address && !x.isLoopbackAddress()) {
+                        apIface = name;
+                        apIp = x.getHostAddress();
+                        break;
+                    }
+                }
+                if (!apIface.isEmpty()) {
+                    break;
+                }
+            }
+        } catch (Exception ignored) {
+        }
+        if (!apIface.isEmpty()) {
+            on = true;
+        }
+        // 老机型热点网段是 192.168.43.x，网卡名可能仍是 wlan0，补一条特征判断。
+        if (!on) {
+            JSONObject route = routeInfo(ctx);
+            String rdev = route.optString("dev", "");
+            String rip = route.optString("ip", "");
+            if (!rip.isEmpty() && rip.startsWith("192.168.43.") && !ipConnectsToRouter(ctx, rdev)) {
                 on = true;
+                apIface = rdev;
+                apIp = rip;
             }
         }
-        if (on) {
-            iface = dev.isEmpty() ? "wlan1" : dev;
-            if (!ip.isEmpty()) {
-                a.put(ip + "/24");
-            }
+        JSONArray a = new JSONArray();
+        String iface = on && !apIface.isEmpty() ? apIface : "";
+        String ip = on ? apIp : "";
+        if (!ip.isEmpty()) {
+            a.put(ip + "/24");
         }
         h.put("on", on);
         h.put("ssid", on ? nz(Build.MODEL) : "");
@@ -287,6 +313,16 @@ public class Dev {
         h.put("freq_mhz", 0);
         h.put("clients", 0);
         return h;
+    }
+
+    /** SoftAp 网卡命名：原生 wlan1 / ap0，部分机型 swlan0、softap0。 */
+    private static boolean isApIface(String name) {
+        if (name == null) {
+            return false;
+        }
+        String n = name.toLowerCase(java.util.Locale.US);
+        return n.startsWith("wlan1") || n.startsWith("ap") || n.startsWith("swlan")
+                || n.startsWith("softap");
     }
 
     /** 当前默认网络是不是连在路由器（而不是自己开的 SoftAp）上。 */
@@ -499,7 +535,7 @@ public class Dev {
             } else {
                 sb.append("WiFi 未连接\n");
             }
-            sb.append("热点 ").append(h.getBoolean("on") ? "开（按网段推断）" : "关");
+            sb.append("热点 ").append(h.getBoolean("on") ? "开" : "关");
             if (h.getBoolean("on")) {
                 sb.append("  地址 ").append(h.getJSONArray("addrs").optString(0, "--"));
             }

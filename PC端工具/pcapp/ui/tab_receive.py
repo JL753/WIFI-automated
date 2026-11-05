@@ -8,7 +8,7 @@ import urllib.request
 
 from PySide6 import QtCore, QtGui, QtWidgets
 
-from .. import protocol, receiver, reports, store
+from .. import protocol, receiver, reports, store, usbexport
 from .widgets import card, human_size
 
 COLUMNS = ["接收时间", "模式", "设备", "测试项", "逐秒行", "来源 IP", "大小"]
@@ -19,15 +19,25 @@ class ReceiveTab(QtWidgets.QWidget):
     # 模拟发送在后台线程跑，回来要切到主线程再动按钮
     sim_done = QtCore.Signal()
 
+    # USB 导出同理：adb 是阻塞进程，绝不能在界面线程里等
+    usb_done = QtCore.Signal(dict)
+    usb_failed = QtCore.Signal(str)
+    usb_devices = QtCore.Signal(list)
+
     def __init__(self, ctx, parent=None):
         super().__init__(parent)
         self.ctx = ctx
         self._build()
         self.sim_done.connect(self._on_sim_done)
+        self.usb_done.connect(self._on_usb_done)
+        self.usb_failed.connect(self._on_usb_failed)
+        self.usb_devices.connect(self._on_usb_devices)
         self.refresh_table()
         self._update_status()
         if self.ctx.cfg.get("auto_start"):
             self.start()
+        # 进来就先探一次设备；没装 adb 也只是下拉显示「未检测到设备」，不弹窗
+        self.refresh_usb_devices()
 
     # ---------------- 界面 ----------------
 
@@ -64,6 +74,32 @@ class ReceiveTab(QtWidgets.QWidget):
         tip.setStyleSheet("color:#666;")
         lay.addWidget(tip)
         root.addWidget(box)
+
+        box_usb, lay_usb = card("从手机导出（USB）")
+        usb_tip = QtWidgets.QLabel(
+            "手机用 USB 连电脑并打开 USB 调试，这里就能把手机上保存的历史记录一次全导进来，"
+            "并自动生成报告。")
+        usb_tip.setWordWrap(True)
+        usb_tip.setStyleSheet("color:#666;")
+        lay_usb.addWidget(usb_tip)
+
+        usb_row = QtWidgets.QHBoxLayout()
+        usb_row.setSpacing(8)
+        self.cmb_usb = QtWidgets.QComboBox()
+        self.cmb_usb.setMinimumWidth(240)
+        self.cmb_usb.addItem("未检测到设备")
+        self.btn_usb_scan = QtWidgets.QPushButton("刷新设备")
+        self.btn_usb_scan.setFixedWidth(88)
+        self.btn_usb_scan.clicked.connect(self.refresh_usb_devices)
+        self.btn_usb_export = QtWidgets.QPushButton("从手机导出")
+        self.btn_usb_export.setFixedWidth(112)
+        self.btn_usb_export.clicked.connect(self.export_usb)
+        usb_row.addWidget(QtWidgets.QLabel("设备"))
+        usb_row.addWidget(self.cmb_usb, 1)
+        usb_row.addWidget(self.btn_usb_scan)
+        usb_row.addWidget(self.btn_usb_export)
+        lay_usb.addLayout(usb_row)
+        root.addWidget(box_usb)
 
         box2, lay2 = card("已接收的结果（双击打开报告）")
         self.table = QtWidgets.QTableWidget(0, len(COLUMNS))
@@ -232,6 +268,87 @@ class ReceiveTab(QtWidgets.QWidget):
 
     def _on_sim_done(self):
         self.btn_sim.setEnabled(True)
+
+    # ---------------- 从手机导出（USB） ----------------
+
+    def refresh_usb_devices(self):
+        """后台摸一遍 adb 设备表。任何异常都静默 —— 没装 adb 不该拦着人用别的功能。"""
+        self.btn_usb_scan.setEnabled(False)
+        th = threading.Thread(target=self._usb_devices_worker, name="usb-devices", daemon=True)
+        th.start()
+
+    def _usb_devices_worker(self):
+        try:
+            adb = usbexport.find_adb()
+            devices = usbexport.list_devices(adb)
+        except Exception:                 # 没装 adb、设备没授权……一律按「没设备」处理
+            self.usb_devices.emit([])
+        else:
+            self.usb_devices.emit([d for d in devices if d.get("state") == "device"])
+
+    def _on_usb_devices(self, devices):
+        self.btn_usb_scan.setEnabled(True)
+        want = usbexport.default_serial(devices)
+        self.cmb_usb.clear()
+        if not devices:
+            self.cmb_usb.addItem("未检测到设备")
+            self.cmb_usb.setEnabled(False)
+            self.btn_usb_export.setEnabled(False)
+            return
+        for d in devices:
+            self.cmb_usb.addItem(str(d.get("serial") or ""))
+        self.cmb_usb.setEnabled(True)
+        self.btn_usb_export.setEnabled(True)
+        idx = self.cmb_usb.findText(want)
+        self.cmb_usb.setCurrentIndex(idx if idx >= 0 else 0)
+
+    def export_usb(self):
+        serial = self.cmb_usb.currentText().strip()
+        if not serial or serial == "未检测到设备":
+            QtWidgets.QMessageBox.warning(
+                self, "没有可用的手机",
+                "先用 USB 连上手机并打开 USB 调试，再点「刷新设备」。")
+            return
+        self.btn_usb_export.setEnabled(False)
+        self.btn_usb_scan.setEnabled(False)
+        self.btn_usb_export.setText("正在导出…")
+        self.ctx.bus.log.emit("开始从手机导出：%s" % serial)
+        th = threading.Thread(target=self._usb_export_worker, args=(serial,),
+                              name="usb-export", daemon=True)
+        th.start()
+
+    def _usb_export_worker(self, serial):
+        try:
+            result = self.ctx.import_from_usb(serial)
+        except Exception as exc:          # 包括 UsbError，原文直接给用户看
+            self.usb_failed.emit(str(exc))
+        else:
+            self.usb_done.emit(result)
+
+    def _on_usb_done(self, result):
+        self._usb_busy_reset()
+        self.refresh_table()
+        imported = result.get("imported", 0)
+        skipped = result.get("skipped", 0)
+        msg = "导入了 %d 条，跳过 %d 条" % (imported, skipped)
+        if skipped:
+            msg += ("\n\n跳过的多半是「服务端没收到流量」的那种记录：日志里一行数据都没有，"
+                    "没东西可还原。")
+        errors = result.get("errors") or []
+        if errors:
+            msg += "\n\n有 %d 条没能导入：\n%s" % (len(errors), "\n".join(errors[:5]))
+        QtWidgets.QMessageBox.information(self, "从手机导出完成", msg)
+        self.ctx.bus.log.emit("USB 导出完成：落在 %s" % result.get("dest", ""))
+
+    def _on_usb_failed(self, message):
+        self._usb_busy_reset()
+        QtWidgets.QMessageBox.warning(self, "从手机导出失败", message)
+        self.ctx.bus.log.emit("USB 导出失败：%s" % message)
+
+    def _usb_busy_reset(self):
+        self.btn_usb_export.setText("从手机导出")
+        self.btn_usb_export.setEnabled(True)
+        self.btn_usb_scan.setEnabled(True)
 
 
 def _mode_cn(mode):

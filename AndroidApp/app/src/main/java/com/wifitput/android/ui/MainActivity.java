@@ -12,6 +12,7 @@ import android.widget.LinearLayout;
 import android.widget.TextView;
 
 import com.wifitput.android.core.Dev;
+import com.wifitput.android.core.Qr;
 import com.wifitput.android.core.Upload;
 
 import org.json.JSONObject;
@@ -178,9 +179,9 @@ public class MainActivity extends Activity {
     @Override
     protected void onActivityResult(int req, int res, android.content.Intent data) {
         super.onActivityResult(req, res, data);
-        String[] addr = QrDialog.result(req, res, data);
-        if (addr != null && current >= 0 && current < panels.size()) {
-            panels.get(current).onQrResult(addr);
+        Qr.Peer p = QrDialog.result(req, res, data);
+        if (p != null && current >= 0 && current < panels.size()) {
+            panels.get(current).onQrPeer(p);
         }
     }
 

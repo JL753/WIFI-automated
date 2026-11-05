@@ -20,6 +20,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * Wi-Fi Direct（P2P）组网封装。
@@ -51,6 +52,27 @@ public class WifiDirect {
     private boolean registered;
     private boolean closed;
     private boolean p2pEnabled;
+
+    /** 本机 P2P 设备地址/名称：出码时要写进二维码，供扫码方直接发起连接。 */
+    private volatile String selfAddress = "";
+    private volatile String selfName = "";
+
+    /** 最近一次群组信息回调的结果，供页面随时查询而不必再发一次系统请求。 */
+    private volatile boolean inGroup;
+    private volatile String ownerIp = "";
+
+    /** 按设备名直连：目标名非空时，requestPeers 的结果先拿来做自动匹配，不弹手动列表。 */
+    private volatile String wantName;
+    /** 按设备名直连没搜到时的回调，与 wantName 一同设置、一同清空。 */
+    private Runnable wantMiss;
+    /** 每次 connectByName 的代号；回调只认最新一次，避免上一次的残留超时误清新一次的意图。 */
+    private volatile int wantGen;
+    /** 搜到对端后等多久再发起连接：刚发现设备就 connect，系统会卡在 ProvisionDiscovery 两分钟才超时。 */
+    private static final long CONNECT_GAP_MS = 3000;
+
+    /** 是否有人在等手动选设备：只有 discoverForPick 置位，列表交出去立刻清掉，避免重复弹窗。
+     *  跨线程读写（主线程置位、PeerListListener 回调线程读），必须 volatile。 */
+    private volatile boolean pickMode;
 
     public WifiDirect(Context ctx, Cb cb) {
         Context app = ctx;
@@ -123,6 +145,18 @@ public class WifiDirect {
         }
     }
 
+    /**
+     * 手动搜索附近设备并弹列表选一个。
+     *
+     * <p>只有走这条路径才会把设备列表交给上层（onPeers）弹手动列表；
+     * 扫码自动直连（connectByName）期间收到 PEERS_CHANGED 一律静默，
+     * 否则自动连上之后还会再弹一次手动列表。</p>
+     */
+    public void discoverForPick() {
+        pickMode = true;
+        discover();
+    }
+
     public void stopDiscover() {
         if (!ready()) {
             return;
@@ -175,9 +209,37 @@ public class WifiDirect {
     }
 
     public void removeGroup() {
+        removeGroup(null);
+    }
+
+    /**
+     * 移除当前群组，结束后在本类已有的主线程 Handler 上回调 done（至多一次）。
+     *
+     * <p>残留群组（GroupCreatedState 但 networkName 为空）时有两条路能把上层卡死：
+     * requestGroupInfo 的回调可能永远不来，或回调里拿到 null 群组。
+     * 所以这里用一个只认第一次的原子开关 + 独立兜底计时器兜底，保证 done 恰好被调一次。</p>
+     *
+     * @param done 结束回调，可为 null
+     */
+    public void removeGroup(final Runnable done) {
+        final AtomicBoolean once = new AtomicBoolean(false);
+        final Runnable fire = new Runnable() {
+            @Override
+            public void run() {
+                if (!once.compareAndSet(false, true)) {
+                    return;
+                }
+                if (done != null) {
+                    done.run();
+                }
+            }
+        };
+
         if (!ready()) {
+            ui.post(fire);
             return;
         }
+
         try {
             manager.requestGroupInfo(channel, new WifiP2pManager.GroupInfoListener() {
                 @Override
@@ -193,11 +255,59 @@ public class WifiDirect {
                     } catch (Exception e) {
                         line("!!", "移除群组失败：" + e);
                     }
+                    ui.post(fire);
                 }
             });
         } catch (Exception e) {
             line("!!", "移除群组失败：" + e);
         }
+
+        ui.postDelayed(fire, 3000);
+    }
+
+    /**
+     * 按设备名搜对端并直接发起 Wi-Fi Direct 连接。
+     *
+     * <p>匹配顺序：① 名字完全相同（忽略大小写、忽略首尾空白）；② 都不满足则等下一次 PEERS_CHANGED。
+     * 20 秒仍未匹配则清空意图并在主线程调 onMiss。</p>
+     *
+     * @param name   对端投屏码里的设备名
+     * @param onMiss 没搜到时的回调，可为 null
+     */
+    public void connectByName(final String name, final Runnable onMiss) {
+        final String want = name == null ? "" : name.trim();
+        if (want.length() == 0) {
+            if (onMiss != null) {
+                ui.post(onMiss);
+            }
+            return;
+        }
+
+        wantMiss = onMiss;
+        wantName = want;
+        wantGen++;
+        final int gen = wantGen;
+
+        line("--", "按投屏码搜索对端：" + want);
+        discover();
+
+        ui.postDelayed(new Runnable() {
+            @Override
+            public void run() {
+                if (wantGen != gen || wantName == null) {
+                    return;
+                }
+                wantName = null;
+                Runnable miss = wantMiss;
+                wantMiss = null;
+                pickMode = false;
+                stopDiscover();
+                line("!!", "没搜到名字是 " + want + " 的对端");
+                if (miss != null) {
+                    miss.run();
+                }
+            }
+        }, 20000);
     }
 
     public void refresh() {
@@ -256,6 +366,8 @@ public class WifiDirect {
                     }
                     String ssid = g != null && g.getNetworkName() != null ? g.getNetworkName() : "";
                     String pass = g != null && g.getPassphrase() != null ? g.getPassphrase() : "";
+                    inGroup = grouped;
+                    ownerIp = grouped ? goIp : "";
                     group(grouped, isGo, goIp, ssid, pass);
                 }
             });
@@ -264,6 +376,8 @@ public class WifiDirect {
             line("!!", "读取连接信息失败：" + e);
         }
         if (!asked) {
+            inGroup = false;
+            ownerIp = "";
             group(false, false, "", "", "");
         }
     }
@@ -289,6 +403,12 @@ public class WifiDirect {
                 } catch (Exception ignored) {
                 }
                 if (d != null && d.deviceAddress != null) {
+                    if (d.deviceAddress.length() > 0) {
+                        selfAddress = d.deviceAddress;
+                    }
+                    if (d.deviceName != null) {
+                        selfName = d.deviceName;
+                    }
                     line("--", "本机 P2P 地址：" + d.deviceAddress);
                 }
             }
@@ -299,7 +419,10 @@ public class WifiDirect {
 
     private void requestPeers() {
         if (!ready()) {
-            peers(new ArrayList<String[]>());
+            if (wantName == null && pickMode) {
+                pickMode = false;
+                peers(new ArrayList<String[]>());
+            }
             return;
         }
         boolean asked = false;
@@ -326,6 +449,32 @@ public class WifiDirect {
                         }
                         out.addAll(uniq.values());
                     }
+
+                    final String want = wantName;
+                    if (want != null) {
+                        final String addr = matchPeer(want, out);
+                        if (addr == null) {
+                            return;   // 还没匹配到，等下一次 PEERS_CHANGED
+                        }
+                        wantName = null;
+                        wantMiss = null;
+                        pickMode = false;
+                        line("OK", "找到对端，正在连接：" + addr);
+                        // 实测：自己 stopDiscover 后 12ms 就 connect，P2P 会卡在 ProvisionDiscoveryState 两分钟才超时；
+                        // 而「搜索还在跑、随后 connect（由 connect 自己停掉搜索）」那次 141ms 就建成组。
+                        // 所以这里不停搜索，留一段空档直接 connect，让系统按它自己验证过的时序走。
+                        ui.postDelayed(new Runnable() {
+                            @Override
+                            public void run() {
+                                connect(addr);
+                            }
+                        }, CONNECT_GAP_MS);
+                        return;       // 自动连接期间不弹手动列表
+                    }
+                    if (!pickMode) {
+                        return;       // 没有人要手动选设备，静默
+                    }
+                    pickMode = false;
                     peers(out);
                 }
             });
@@ -334,12 +483,63 @@ public class WifiDirect {
             line("!!", "读取设备列表失败：" + e);
         }
         if (!asked) {
-            peers(new ArrayList<String[]>());
+            if (wantName == null && pickMode) {
+                pickMode = false;
+                peers(new ArrayList<String[]>());
+            }
         }
+    }
+
+    /**
+     * 在设备列表里按名匹配直连目标。
+     *
+     * <p>只认精确名字（忽略大小写与首尾空白）。现场常常十几台投屏设备同时在广播，
+     * 「列表里只剩一个设备就用它」会把陌生设备误当对端连上去，所以宁可不命中，等下一次回调。</p>
+     *
+     * @return 命中返回设备地址；没命中返回 null（继续等下一次回调）
+     */
+    private static String matchPeer(String want, List<String[]> list) {
+        if (list == null || want == null) {
+            return null;
+        }
+        for (String[] p : list) {
+            if (p == null || p.length < 2) {
+                continue;
+            }
+            String addr = p[0];
+            if (addr == null || addr.length() == 0) {
+                continue;
+            }
+            String name = p[1] == null ? "" : p[1].trim();
+            if (name.equalsIgnoreCase(want)) {
+                return addr;
+            }
+        }
+        return null;
     }
 
     private boolean closePending() {
         return closed;
+    }
+
+    /** 本机 Wi-Fi Direct 设备地址，未拿到返回 ""。 */
+    public String selfAddress() {
+        return selfAddress;
+    }
+
+    /** 本机 Wi-Fi Direct 设备名，未拿到返回 ""。 */
+    public String selfName() {
+        return selfName;
+    }
+
+    /** 当前是否已组网（最近一次群组信息回调的结果）。 */
+    public boolean inGroup() {
+        return inGroup;
+    }
+
+    /** 当前群主 IP，未组网返回 ""。 */
+    public String groupOwnerIp() {
+        return ownerIp;
     }
 
     /**

@@ -8,6 +8,7 @@ import com.google.zxing.common.BitMatrix;
 import com.google.zxing.qrcode.QRCodeWriter;
 
 import java.net.URLDecoder;
+import java.net.URLEncoder;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -18,6 +19,10 @@ import java.util.Map;
  * 因此即使被旁观者拍到，也不会泄露认证信息；真正的鉴权仍由连接阶段完成。</p>
  *
  * <p>解析时只接受点分十进制 IPv4，主机名与其他非 IPv4 字面量一律拒绝。</p>
+ *
+ * <p>可选字段 mac 用于 P2P 投屏直连：它只是 Wi-Fi Direct 设备地址，
+ * 不含密码或密钥，扫码方拿到它才能直接 connect 建立群组；
+ * 群组本身的加密口令由系统协商，从不进入二维码。</p>
  */
 public class Qr {
 
@@ -29,6 +34,25 @@ public class Qr {
 
     /** 未指定边长时使用的默认像素边长。 */
     private static final int DEFAULT_PX = 512;
+
+    /**
+     * Android 12+ 对普通 App 会把本机 WifiP2pDevice.deviceAddress 打码成这个值，
+     * 拿它去 connect 一定失败，所以解析时等同于「这张码里没有可直连的地址」。
+     */
+    private static final String MASKED_MAC = "02:00:00:00:00:00";
+
+    /** 二维码承载的对端信息；mac 为空表示这只是一张普通地址码，不能直连投屏。 */
+    public static class Peer {
+        public String ip = "";
+        public int port = 5201;
+        public String mac = "";   // Wi-Fi Direct 设备地址，形如 76:ab:f3:b4:37:b6
+        public String name = "";  // 对端设备名，可为空
+
+        /** 是否带 P2P 设备地址（能直接发起 Wi-Fi Direct 连接）。 */
+        public boolean cast() {
+            return mac.length() > 0;
+        }
+    }
 
     /**
      * 生成对端地址的二维码文本。
@@ -43,6 +67,40 @@ public class Qr {
     }
 
     /**
+     * 生成投屏用的二维码文本，比 {@link #encode(String, int)} 多带 P2P 设备地址与设备名。
+     *
+     * <p>设备名可能与端口参数里的字符冲突，所以必须 URL 编码；
+     * mac 为空时不写 mac 键，让旧解析器/旧码保持兼容。</p>
+     *
+     * @param ip   本机在 P2P 群组里的 IP
+     * @param port iperf 端口
+     * @param mac  本机 Wi-Fi Direct 设备地址，可为空
+     * @param name 本机设备名，可为空
+     * @return 形如 wifitput://peer?ip=192.168.49.1&port=5201&mac=76:ab:f3:b4:37:b6&name=Infinix+X6878 的文本
+     *         （URLEncoder 把空格编码成 +，parsePeer 的 URLDecoder 会还原）
+     */
+    public static String encodeCast(String ip, int port, String mac, String name) {
+        String host = ip == null ? "" : ip.trim();
+        String addr = mac == null ? "" : mac.trim();
+        String label = name == null ? "" : name.trim();
+
+        StringBuilder sb = new StringBuilder(80);
+        sb.append(PREFIX).append("ip=").append(host).append("&port=").append(port);
+        if (addr.length() > 0) {
+            sb.append("&mac=").append(addr);
+        }
+        if (label.length() > 0) {
+            String enc = label;
+            try {
+                enc = URLEncoder.encode(label, "UTF-8");
+            } catch (Exception ignored) {
+            }
+            sb.append("&name=").append(enc);
+        }
+        return sb.toString();
+    }
+
+    /**
      * 解析扫描结果。
      *
      * <p>容忍首尾空白、多余的 URL 参数，以及裸的 10.0.0.2:5201 / 10.0.0.2 两种写法。</p>
@@ -51,6 +109,23 @@ public class Qr {
      * @return 成功返回 {ip, port}，失败返回 null
      */
     public static String[] parse(String text) {
+        Peer p = parsePeer(text);
+        if (p == null) {
+            return null;
+        }
+        return new String[]{p.ip, String.valueOf(p.port)};
+    }
+
+    /**
+     * 解析扫描结果，保留 mac/name 等投屏字段。
+     *
+     * <p>容错与 {@link #parse(String)} 一致；mac 非法时只丢掉 mac（仍可当普通地址码用），
+     * 而不是整张码作废。</p>
+     *
+     * @param text 扫描到的原始文本
+     * @return 成功返回 Peer，失败返回 null
+     */
+    public static Qr.Peer parsePeer(String text) {
         if (text == null) {
             return null;
         }
@@ -61,6 +136,8 @@ public class Qr {
 
         String ip = null;
         int port = DEFAULT_PORT;
+        String mac = "";
+        String name = "";
 
         if (raw.regionMatches(true, 0, PREFIX, 0, PREFIX.length())) {
             String body = raw.substring(PREFIX.length());
@@ -76,6 +153,10 @@ public class Qr {
                     ip = value.trim();
                 } else if ("port".equalsIgnoreCase(key)) {
                     port = toPort(value.trim(), DEFAULT_PORT);
+                } else if ("mac".equalsIgnoreCase(key)) {
+                    mac = value.trim();
+                } else if ("name".equalsIgnoreCase(key)) {
+                    name = value.trim();
                 }
             }
         } else {
@@ -97,7 +178,16 @@ public class Qr {
         if (!isIpv4(ip)) {
             return null;
         }
-        return new String[]{ip, String.valueOf(port)};
+
+        Peer peer = new Peer();
+        peer.ip = ip;
+        peer.port = port;
+        peer.mac = isMac(mac) ? mac : "";
+        if (MASKED_MAC.equalsIgnoreCase(peer.mac)) {
+            peer.mac = "";
+        }
+        peer.name = name;
+        return peer;
     }
 
     /** 是否是合法的点分十进制 IPv4；不接受前导零与越界段。 */
@@ -128,6 +218,28 @@ public class Qr {
             }
         }
         return true;
+    }
+
+    /** 是否是 xx:xx:xx:xx:xx:xx 形式的 Wi-Fi Direct 设备地址，大小写都接受。 */
+    private static boolean isMac(String s) {
+        if (s == null || s.length() != 17) {
+            return false;
+        }
+        for (int i = 0; i < 17; i++) {
+            char ch = s.charAt(i);
+            if (i % 3 == 2) {
+                if (ch != ':') {
+                    return false;
+                }
+            } else if (!isHex(ch)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static boolean isHex(char ch) {
+        return (ch >= '0' && ch <= '9') || (ch >= 'a' && ch <= 'f') || (ch >= 'A' && ch <= 'F');
     }
 
     /**

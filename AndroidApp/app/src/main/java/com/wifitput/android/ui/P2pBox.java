@@ -3,6 +3,9 @@ package com.wifitput.android.ui;
 import android.app.AlertDialog;
 import android.content.Context;
 import android.content.DialogInterface;
+import android.os.Build;
+import android.os.Handler;
+import android.os.Looper;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.Button;
@@ -31,6 +34,21 @@ class P2pBox extends LinearLayout implements WifiDirect.Cb {
 
     private String goIp = "";
     private boolean grouped;
+
+    /** 等组网成功后要执行的动作（出码 / 按码连接），没有等的时候为 null。 */
+    private Runnable pending;
+    private final Handler ui = new Handler(Looper.getMainLooper());
+
+    /** 等待组网的兜底计时器：P2P 协商偶尔会卡住，不能一直挂着。 */
+    private final Runnable timeout = new Runnable() {
+        @Override
+        public void run() {
+            if (pending != null) {
+                pending = null;
+                setStatus("等组网超时，可以再点一次，或用下面的手动组网", Ui.RED);
+            }
+        }
+    };
 
     P2pBox(Context c) {
         super(c);
@@ -90,7 +108,7 @@ class P2pBox extends LinearLayout implements WifiDirect.Cb {
             if (what == 0) {
                 wd.createGroup();
             } else if (what == 1) {
-                wd.discover();
+                wd.discoverForPick();
             } else {
                 wd.removeGroup();
             }
@@ -207,12 +225,111 @@ class P2pBox extends LinearLayout implements WifiDirect.Cb {
                     sb.append("，密码 ").append(pass);
                 }
                 setStatus(sb.toString(), Ui.GREEN);
+                // 组网一成功就得把等着的动作放出去，否则点完按钮毫无反应
+                if (pending != null) {
+                    Runnable next = pending;
+                    pending = null;
+                    ui.removeCallbacks(timeout);
+                    ui.post(next);
+                }
             }
         });
     }
 
+    /** 本机 P2P 设备地址，未拿到 ""。 */
+    String selfMac() {
+        return wd == null ? "" : nz(wd.selfAddress());
+    }
+
+    /** 本机 P2P 设备名，未拿到 ""（空时回落到机型名，至少比空白好认）。 */
+    String selfName() {
+        String n = wd == null ? "" : nz(wd.selfName()).trim();
+        if (n.length() == 0) {
+            n = nz(Build.MODEL).trim();
+        }
+        return n;
+    }
+
+    /** 群主 IP，未组网 ""。 */
+    String ownerIp() {
+        return wd == null ? "" : nz(wd.groupOwnerIp());
+    }
+
+    /** 已组网就立刻回调；否则先清残留群组再组建群组，等组网成功回调。最多等 25 秒，回调在主线程。 */
+    void ensureGroup(final Runnable onReady) {
+        if (!usable || wd == null) {
+            setStatus(NO_P2P, Ui.GREY);
+            return;
+        }
+        if (grouped && ownerIp().length() > 0) {
+            ui.post(onReady);
+            return;
+        }
+        arm(onReady);
+        // Android 12+ 若系统里还留着废弃群组，createGroup 的 onSuccess 不回调，界面会静默卡满 25 秒
+        setStatus("正在清理残留群组…", Ui.GREY);
+        try {
+            wd.removeGroup(new Runnable() {
+                @Override
+                public void run() {
+                    setStatus("正在组建群组…", Ui.GREY);
+                    try {
+                        wd.createGroup();
+                    } catch (Throwable t) {
+                        abort("组建群组失败：" + t);
+                    }
+                }
+            });
+        } catch (Throwable t) {
+            abort("组建群组失败：" + t);
+        }
+    }
+
+    /** 按投屏码里的对端设备名搜索并直连。onReady 组网成功后跑，onMiss 搜不到时跑。最多等 25 秒，回调在主线程。 */
+    void connectByName(final String name, final Runnable onReady, final Runnable onMiss) {
+        String n = nz(name).trim();
+        if (n.length() == 0) {
+            setStatus("这个码里没有对端设备名，只能手工填 IP", Ui.RED);
+            if (onMiss != null) {
+                ui.post(onMiss);
+            }
+            return;
+        }
+        if (!usable || wd == null) {
+            setStatus(NO_P2P, Ui.GREY);
+            return;
+        }
+        arm(onReady);
+        setStatus("正在搜索对端 " + n + "…", Ui.GREY);
+        wd.connectByName(n, new Runnable() {
+            @Override
+            public void run() {
+                abort("没搜到「" + n + "」。已按投屏码填好地址，连不上就展开「手动组网（备用）」点「搜索设备」挑一台。");
+                if (onMiss != null) {
+                    ui.post(onMiss);
+                }
+            }
+        });
+    }
+
+    /** 记下待执行动作并起表，重复点按钮时以最后一次为准。 */
+    private void arm(Runnable onReady) {
+        pending = onReady;
+        ui.removeCallbacks(timeout);
+        ui.postDelayed(timeout, 25000);
+    }
+
+    /** 发起阶段就失败：撤掉等待，别让界面停在「正在…」。 */
+    private void abort(String why) {
+        pending = null;
+        ui.removeCallbacks(timeout);
+        setStatus(why, Ui.RED);
+    }
+
     /** 宿主 onPause / 切 Tab 时调：退出群组并释放。 */
     void shutdown() {
+        pending = null;
+        ui.removeCallbacks(timeout);
         try {
             if (wd != null) {
                 wd.removeGroup();

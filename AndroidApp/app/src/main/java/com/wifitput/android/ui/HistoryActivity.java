@@ -18,6 +18,7 @@ import android.widget.TextView;
 
 import com.wifitput.android.core.History;
 
+import java.io.File;
 import java.util.List;
 
 /** 历史记录：列表 + 单条详情。数据全部来自 core.History 落盘的目录，这里只负责展示和删除。 */
@@ -25,6 +26,8 @@ public class HistoryActivity extends Activity {
 
     private static final String TITLE_LIST = "历史记录";
     private static final String NO_LOG = "（这次运行没有日志）";
+    private static final String CARD_SAVE = "数据保存在手机上哪里";
+    private static final String SYNC_FAIL = "同步失败，外部存储可能不可用";
 
     private TextView barTitle;
     private FrameLayout content;
@@ -102,17 +105,21 @@ public class HistoryActivity extends Activity {
             return;
         }
 
-        if (items == null || items.isEmpty()) {
-            content.addView(centeredText("还没有历史记录。跑一次打流或当一次服务端，这里就会出现。"));
-            return;
-        }
-
+        // 打流记录和「数据保存在哪里」这张卡放进同一条滚动路径：
+        // 空列表时先给提示再挂卡片，有记录时卡片排在最上面。
         LinearLayout body = Ui.column(this);
         body.setPadding(Ui.dp(this, 12), Ui.dp(this, 12), Ui.dp(this, 12), Ui.dp(this, 2));
-        for (int i = 0; i < items.size(); i++) {
-            History.Item it = items.get(i);
-            if (it != null) {
-                body.addView(listCard(it));
+
+        if (items == null || items.isEmpty()) {
+            body.addView(emptyHint(), Ui.fill());
+            body.addView(syncCard());
+        } else {
+            body.addView(syncCard());
+            for (int i = 0; i < items.size(); i++) {
+                History.Item it = items.get(i);
+                if (it != null) {
+                    body.addView(listCard(it));
+                }
             }
         }
 
@@ -121,6 +128,127 @@ public class HistoryActivity extends Activity {
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         content.addView(sv, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+    }
+
+    /** 空列表时的居中提示，外面还得挂着同步卡片，所以不再铺满整个 content。 */
+    private View emptyHint() {
+        LinearLayout box = Ui.column(this);
+        TextView t = Ui.text(this,
+                "还没有历史记录。跑一次打流或当一次服务端，这里就会出现。", 13f, Ui.GREY, false);
+        t.setGravity(Gravity.CENTER);
+        box.addView(t, Ui.fill());
+        box.setPadding(0, Ui.dp(this, 24), 0, Ui.dp(this, 16));
+        return box;
+    }
+
+    /** 「数据保存在手机上哪里」卡片：两条真实路径 + USB 导出的走法 + 手动同步按钮。 */
+    private View syncCard() {
+        LinearLayout card = Ui.card(this, CARD_SAVE);
+
+        // 第一行说明：私有目录是什么、USB 连上能做什么
+        card.addView(Ui.hint(this,
+                "历史记录保存在手机的应用私有目录里，电脑用 USB 连上就能导出。"), Ui.fill());
+
+        // 私有目录：复用 History.dir，保证和真正落盘的位置是同一个
+        final String localPath = dirPath();
+        card.addView(pathBlock("手机上的位置", Color.BLACK, localPath, localPath.isEmpty(),
+                "无法读取私有目录"), Ui.fill());
+
+        // USB 可见目录：externalPath 返回空串就是外部存储不可用
+        final String usbPath = History.externalPath(this);
+        final boolean usbOk = !usbPath.isEmpty();
+        card.addView(pathBlock("USB 可见位置", Ui.GREEN, usbPath, !usbOk,
+                "外部存储不可用"), Ui.fill());
+
+        // 电脑端的操作路径，手机这端不用点任何东西
+        card.addView(Ui.hint(this,
+                "电脑端在「收结果」页点「从手机导出（USB）」就能一键导出，手机这端不用操作。"),
+                Ui.fill());
+
+        // 同步结果提示，按钮点完就地更新
+        final TextView result = Ui.text(this, "", 11.5f, Ui.GREY, false);
+        result.setVisibility(View.GONE);
+        result.setPadding(0, Ui.dp(this, 6), 0, Ui.dp(this, 6));
+        card.addView(result, Ui.fill());
+
+        Button sync = Ui.primary(this, "立即同步到 USB 可见目录", new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                startSync(result);
+            }
+        });
+        LinearLayout.LayoutParams blp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        blp.topMargin = Ui.dp(this, 8);
+        card.addView(sync, blp);
+
+        return card;
+    }
+
+    /** 「标签 + 路径」一小块；路径可长按选中复制，等宽字体，异常值走红色提示。 */
+    private View pathBlock(String name, int normalColor, String path, boolean bad, String badText) {
+        LinearLayout box = Ui.column(this);
+        box.setPadding(0, Ui.dp(this, 6), 0, 0);
+
+        TextView label = Ui.text(this, name, 11.5f, Ui.GREY, false);
+        label.setPadding(0, 0, 0, Ui.dp(this, 3));
+        box.addView(label, Ui.fill());
+
+        String show = bad ? badText : path;
+        TextView value = Ui.text(this, show, 11.5f, bad ? Ui.RED : normalColor, false);
+        value.setTypeface(Typeface.MONOSPACE);
+        value.setTextIsSelectable(!bad);
+        value.setPadding(Ui.dp(this, 8), Ui.dp(this, 6), Ui.dp(this, 8), Ui.dp(this, 6));
+        value.setBackgroundColor(0xFFF5F5F5);
+        box.addView(value, Ui.fill());
+        return box;
+    }
+
+    /** History.dir 会顺手建目录，异常时不该把整个列表页带崩。 */
+    private String dirPath() {
+        try {
+            File d = History.dir(this);
+            return d == null ? "" : d.getAbsolutePath();
+        } catch (Exception e) {
+            return "";
+        }
+    }
+
+    /** 后台线程镜像到 USB 可见目录，回主线程只改提示文字。 */
+    private void startSync(final TextView result) {
+        result.setVisibility(View.VISIBLE);
+        result.setTextColor(Ui.GREY);
+        result.setText("正在同步…");
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                int n = 0;
+                try {
+                    n = History.syncToExternal(HistoryActivity.this);
+                } catch (Exception e) {
+                    // 同步是附加能力，失败只影响提示文案，不该崩页面
+                    n = 0;
+                }
+                final int count = n;
+                runOnUiThread(new Runnable() {
+                    @Override
+                    public void run() {
+                        // 页面可能已经退出，这时候碰界面会炸
+                        if (isFinishing()) {
+                            return;
+                        }
+                        result.setVisibility(View.VISIBLE);
+                        if (count > 0) {
+                            result.setTextColor(Ui.GREEN);
+                            result.setText("已同步 " + count + " 条到 USB 可见目录");
+                        } else {
+                            result.setTextColor(Ui.RED);
+                            result.setText(SYNC_FAIL);
+                        }
+                    }
+                });
+            }
+        }).start();
     }
 
     private View listCard(final History.Item it) {

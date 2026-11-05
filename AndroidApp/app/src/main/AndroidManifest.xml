@@ -35,6 +35,20 @@
         </activity>
 
         <activity
+            android:name=".ui.QrShowActivity"
+            android:exported="false"
+            android:screenOrientation="portrait"
+            android:configChanges="orientation|screenSize|keyboardHidden"
+            android:theme="@style/AppTheme" />
+
+        <activity
+            android:name=".ui.QrCaptureActivity"
+            android:exported="false"
+            android:screenOrientation="portrait"
+            android:configChanges="orientation|screenSize|keyboardHidden"
+            android:theme="@style/zxing_CaptureTheme" />
+
+        <activity
             android:name=".ui.HistoryActivity"
             android:exported="false"
             android:label="历史记录" />

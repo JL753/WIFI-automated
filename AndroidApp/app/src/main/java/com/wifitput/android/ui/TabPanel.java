@@ -13,6 +13,7 @@ import android.widget.TextView;
 import com.wifitput.android.core.Bundle;
 import com.wifitput.android.core.Discovery;
 import com.wifitput.android.core.Prefs;
+import com.wifitput.android.core.Qr;
 
 import java.util.List;
 
@@ -102,31 +103,6 @@ class TabPanel extends android.widget.ScrollView implements Session.Listener, Ad
         c1.addView(roleRow);
         serveHint = Ui.hint(c, serveHintText());
         c1.addView(serveHint);
-        if ("p2p".equals(mode)) {
-            LinearLayout qrRow = Ui.row(c);
-            Button mineBtn = Ui.ghost(c, "我的二维码", new View.OnClickListener() {
-                @Override
-                public void onClick(View v) {
-                    QrDialog.showMine(getContext(), firstIp(), session.port);
-                }
-            });
-            Button scanQrBtn = Ui.ghost(c, "扫一扫", new View.OnClickListener() {
-                @Override
-                public void onClick(View v) {
-                    android.content.Context cc = getContext();
-                    if (cc instanceof android.app.Activity) {
-                        QrDialog.scan((android.app.Activity) cc);
-                    } else {
-                        log.add("!! 当前界面不支持扫码");
-                    }
-                }
-            });
-            qrRow.addView(mineBtn, Ui.w(1f));
-            Ui.margin(c, mineBtn, 0, 0, 5, 0);
-            qrRow.addView(scanQrBtn, Ui.w(1f));
-            Ui.margin(c, scanQrBtn, 5, 0, 0, 0);
-            c1.addView(qrRow);
-        }
         root.addView(c1);
 
         // 卡片 2：对端地址（可收起）
@@ -195,7 +171,64 @@ class TabPanel extends android.widget.ScrollView implements Session.Listener, Ad
         } else if ("p2p".equals(mode)) {
             LinearLayout c4 = Ui.card(c, null);
             p2p = new P2pBox(c);
-            c4.addView(p2p);
+
+            c4.addView(Ui.cardTitle(c, "投屏直连"));
+            c4.addView(Ui.hint(c, "出码这台上点「我的投屏码」，另一台用「扫码直连」扫它，"
+                    + "两台就自动组好 Wi-Fi Direct 群组，地址也会自动填好。"));
+
+            LinearLayout castRow = Ui.row(c);
+            Button mineBtn = Ui.primary(c, "我的投屏码", new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    log.add("-- 正在准备投屏码…");
+                    if (p2p == null) {
+                        log.add("!! 这台设备不支持 Wi-Fi Direct");
+                        return;
+                    }
+                    // 出码这台必须先当上群主，码里的 MAC 才对得上，扫码那台才连得进来
+                    p2p.ensureGroup(new Runnable() {
+                        @Override
+                        public void run() {
+                            String ip = p2p.ownerIp();
+                            if (ip == null || ip.length() == 0) {
+                                ip = firstIp();
+                            }
+                            if (ip.length() == 0) {
+                                log.add("!! 还没拿到本机地址，先连上 WiFi 或等一下再试");
+                                return;
+                            }
+                            String mac = p2p.selfMac();
+                            String text = Qr.encodeCast(ip, session.port, mac, p2p.selfName());
+                            QrDialog.showCast(getContext(), text,
+                                    "对端扫码后会自动组网。群主地址 " + ip + "，端口 " + session.port);
+                            log.add("OK 投屏码已生成，群主地址 " + ip
+                                    + "，设备名 " + p2p.selfName());
+                        }
+                    });
+                }
+            });
+            Button scanQrBtn = Ui.ghost(c, "扫码直连", new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    android.content.Context cc = getContext();
+                    if (cc instanceof android.app.Activity) {
+                        QrDialog.scan((android.app.Activity) cc);
+                    } else {
+                        log.add("!! 当前界面不支持扫码");
+                    }
+                }
+            });
+            castRow.addView(mineBtn, Ui.w(1.35f));
+            Ui.margin(c, mineBtn, 0, 0, 8, 0);
+            castRow.addView(scanQrBtn, Ui.w(1f));
+            Ui.margin(c, scanQrBtn, 8, 0, 0, 0);
+            c4.addView(castRow);
+
+            // 手动那套还在，只是收起来：投屏码这条路不通时它仍是唯一退路
+            Fold manual = new Fold(c, "手动组网（备用）", "p2p_manual", false);
+            manual.body().addView(p2p);
+            c4.addView(manual);
+
             root.addView(c4);
         }
 
@@ -392,16 +425,36 @@ class TabPanel extends android.widget.ScrollView implements Session.Listener, Ad
     }
 
     /** 扫码结果回来时由宿主 Activity 调用。 */
-    void onQrResult(String[] addr) {
-        if (addr == null) {
-            log.add("!! 没扫到可用的对端地址");
+    void onQrPeer(final Qr.Peer peer) {
+        if (peer == null) {
+            log.add("!! 没扫到可用的投屏码");
             return;
         }
-        try {
-            fill(addr[0], Integer.parseInt(addr[1]));
-        } catch (NumberFormatException e) {
-            log.add("!! 二维码里的端口不对：" + addr[1]);
+        // Android 12+ 码里的 MAC 被打码，按地址连不上；改用对端设备名搜索直连
+        if (p2p != null && peer.name != null && peer.name.length() > 0) {
+            log.add("-- 投屏码指向 " + peer.name + "，正在搜对端准备组网…");
+            // 先把 Wi-Fi Direct 群组连起来再填地址：地址在组网前是不通的
+            p2p.connectByName(peer.name, new Runnable() {
+                @Override
+                public void run() {
+                    fillByQr(peer.ip, peer.port);
+                }
+            }, new Runnable() {
+                @Override
+                public void run() {
+                    fillByQr(peer.ip, peer.port);
+                    log.add("!! 没连上对端，地址已填好但网络可能不通");
+                }
+            });
+            return;
         }
+        fillByQr(peer.ip, peer.port);
+    }
+
+    /** 按投屏码填地址，比手工/扫描多留一行日志，方便事后从日志复盘。 */
+    private void fillByQr(String ip, int port) {
+        fill(ip, port);
+        log.add("OK 已按投屏码填好对端地址：" + ip + ":" + port);
     }
 
     @Override

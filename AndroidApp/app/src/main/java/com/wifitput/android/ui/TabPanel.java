@@ -14,6 +14,7 @@ import com.wifitput.android.core.Bundle;
 import com.wifitput.android.core.Discovery;
 import com.wifitput.android.core.Prefs;
 import com.wifitput.android.core.Qr;
+import com.wifitput.android.core.Record;
 
 import java.util.List;
 
@@ -27,6 +28,7 @@ class TabPanel extends android.widget.ScrollView implements Session.Listener, Ad
     final String mode;
     private final Session session;
     private final LogBox log;
+    private final RateChart chart;
     private final EditText host;
     private final EditText port;
     private final EditText duration;
@@ -80,6 +82,7 @@ class TabPanel extends android.widget.ScrollView implements Session.Listener, Ad
         root.addView(top, Ui.cardLp(c));
 
         log = new LogBox(c);
+        chart = new RateChart(c);
 
         // 卡片 1：这一台干什么
         LinearLayout c1 = Ui.card(c, "这一台干什么");
@@ -249,6 +252,7 @@ class TabPanel extends android.widget.ScrollView implements Session.Listener, Ad
                 }
                 session.savePrefs();
                 setBusy(true, "打流中…");
+                chart.reset(session.duration);
                 session.runOnce();
             }
         });
@@ -280,7 +284,10 @@ class TabPanel extends android.widget.ScrollView implements Session.Listener, Ad
         runRow.addView(fullBtn, Ui.w(0.62f));
         Ui.margin(c, fullBtn, 8, 0, 0, 0);
         c6.addView(runRow);
-        Ui.margin(c, log, 0, 12, 0, 0);
+        // 实时速率曲线压在日志上方：先看走势，再看逐行明细
+        Ui.margin(c, chart, 0, 12, 0, 0);
+        c6.addView(chart);
+        Ui.margin(c, log, 0, 8, 0, 0);
         c6.addView(log);
         root.addView(c6);
 
@@ -376,6 +383,8 @@ class TabPanel extends android.widget.ScrollView implements Session.Listener, Ad
             session.stopServing();
             serveBtn.setText("当服务端");
             setBusy(false, "服务端已停止");
+            // 停服时把没满一个采样的最后一段也落下来，顺便把空状态文案复位
+            chart.finish();
             return;
         }
         if (session.running()) {
@@ -388,6 +397,8 @@ class TabPanel extends android.widget.ScrollView implements Session.Listener, Ad
         session.savePrefs();
         serveBtn.setText("停止服务端");
         setBusy(true, "服务端就绪");
+        // 当服务端时不知道对方打多久，横轴先按 0 秒起步、随数据往后长
+        chart.reset(0);
         session.startServing();
     }
 
@@ -496,6 +507,17 @@ class TabPanel extends android.widget.ScrollView implements Session.Listener, Ad
         });
     }
 
+    /** 逐秒数据也来自工作线程，统一 post 回主线程再喂给曲线。 */
+    @Override
+    public void onSample(final Record rec) {
+        post(new Runnable() {
+            @Override
+            public void run() {
+                chart.add(rec);
+            }
+        });
+    }
+
     /** Session 的回调都在工作线程，任何控件操作都必须 post 回主线程。 */
     @Override
     public void onLine(final String tag, final String msg) {
@@ -503,6 +525,10 @@ class TabPanel extends android.widget.ScrollView implements Session.Listener, Ad
             @Override
             public void run() {
                 log.add(tag == null ? msg : tag + " " + msg);
+                // 当服务端时，这一行说明对方开了新的一轮打流，曲线也要跟着重画
+                if (msg != null && msg.startsWith("Accepted connection")) {
+                    chart.restartOnNextSample();
+                }
                 if ("XX".equals(tag)) {
                     status.setText("出错，看下面的日志");
                     status.setTextColor(Ui.RED);
@@ -518,6 +544,7 @@ class TabPanel extends android.widget.ScrollView implements Session.Listener, Ad
         post(new Runnable() {
             @Override
             public void run() {
+                chart.finish();
                 serveBtn.setText("当服务端");
                 setBusy(false, bundle == null ? "没有结果" : "完成");
                 if (bundle != null) {

@@ -28,6 +28,9 @@ class Session {
     interface Listener {
         void onLine(String tag, String msg);
 
+        /** 一条逐秒数据行，界面拿去画实时速率曲线（工作线程回调，操作控件要 post）。 */
+        void onSample(Record rec);
+
         void onDone(Bundle bundle, String note);
 
         /** 扫描结束，把扫到的全部对端抛给界面弹窗。空列表表示一个都没找到。 */
@@ -163,6 +166,7 @@ class Session {
                                 if (rec != null) {
                                     String pretty = rec.pretty();
                                     line("--", pretty);
+                                    listener.onSample(rec);
                                     // 单流时 iperf3 不打 [SUM]，收尾汇总那行是 "[ 5] 0-60.06s ... sender"；
                                     // 多流才打 [SUM]。两种都认：带 SUM，或行尾带 sender/receiver 的汇总行。
                                     String tail = raw.trim();
@@ -276,6 +280,7 @@ class Session {
                                 public void onRecord(Record rec) {
                                     // 四流时每秒四条，以前按条数取模会看起来像丢了几秒，逐条交给界面攒批。
                                     line("--", rec.pretty());
+                                    listener.onSample(rec);
                                 }
                             });
                     bundle.addResult(testId, name, r);

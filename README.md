@@ -57,7 +57,8 @@ cd WiFi吞吐量测试工具
 │  ├─ APK                  交付产物：WiFiTput.apk（release）+ WiFiTput-debug.apk
 │  ├─ appsrcmain         java 源码 + jniLibs（iperf3 三件套）+ res
 │  ├─ 打包apk.bat           一键 assembleDebug + assembleRelease
-│  └─ 使用说明.md           安装、双机怎么测、三模式、历史记录、三条硬性限制
+│  ├─ 使用说明.md           安装、双机怎么测、三模式、历史记录、三条硬性限制
+│  └─ 测试原理与数据说明.md  打流原理、每个数字的来源、可信度边界、行业覆盖
 │
 ├─ PC端工具                 PC 接收器（PySide6 三 Tab：收结果 / 出报告 / 设置）
 │  ├─ pcapp                receiver / reports / protocol / ui

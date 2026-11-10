@@ -11,12 +11,19 @@ import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.Button;
+import android.widget.EditText;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
+import android.widget.Toast;
 
+import com.wifitput.android.core.Compare;
 import com.wifitput.android.core.History;
+import com.wifitput.android.core.Stats;
+
+import org.json.JSONArray;
+import org.json.JSONObject;
 
 import java.io.File;
 import java.util.List;
@@ -28,6 +35,7 @@ public class HistoryActivity extends Activity {
     private static final String NO_LOG = "（这次运行没有日志）";
     private static final String CARD_SAVE = "数据保存在手机上哪里";
     private static final String SYNC_FAIL = "同步失败，外部存储可能不可用";
+    private static final int AMBER = 0xFFB26A00;
 
     private TextView barTitle;
     private FrameLayout content;
@@ -60,7 +68,7 @@ public class HistoryActivity extends Activity {
 
     private LinearLayout buildBar() {
         LinearLayout bar = Ui.row(this);
-        bar.setBackgroundColor(Ui.BLUE);
+        bar.setBackground(Ui.headerBg(this));
         bar.setPadding(Ui.dp(this, 14), Ui.dp(this, 12), Ui.dp(this, 14), Ui.dp(this, 12));
 
         TextView back = Ui.text(this, "‹ 返回", 15f, Color.WHITE, false);
@@ -253,8 +261,9 @@ public class HistoryActivity extends Activity {
 
     private View listCard(final History.Item it) {
         LinearLayout card = Ui.column(this);
-        card.setBackground(Ui.round(this, Color.WHITE, Ui.CARD_LINE, 12f));
-        card.setPadding(Ui.dp(this, 12), Ui.dp(this, 10), Ui.dp(this, 12), Ui.dp(this, 10));
+        card.setBackground(Ui.round(this, Color.WHITE, Ui.CARD_LINE, 14f));
+        card.setPadding(Ui.dp(this, 13), Ui.dp(this, 11), Ui.dp(this, 13), Ui.dp(this, 11));
+        card.setElevation(Ui.dp(this, 1f));
         LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         clp.bottomMargin = Ui.dp(this, 9);
@@ -266,9 +275,10 @@ public class HistoryActivity extends Activity {
             }
         });
 
-        // 第一行：标题 + 删除。删除自己有点击监听，点它不会冒泡到卡片进详情。
+        // 第一行：标签（没有就用原标题）+ 删除。删除自己有点击监听，点它不会冒泡到卡片进详情。
         LinearLayout top = Ui.row(this);
-        TextView title = Ui.text(this, safe(it.title), 14f, Ui.INK, true);
+        String name = safe(it.label).trim();
+        TextView title = Ui.text(this, name.isEmpty() ? safe(it.title) : name, 14f, Ui.INK, true);
         title.setSingleLine(false);
         top.addView(title, new LinearLayout.LayoutParams(0,
                 ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
@@ -285,10 +295,13 @@ public class HistoryActivity extends Activity {
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         card.addView(top, Ui.fill());
 
-        // 第二行：概要首行 + 角色标签
+        // 第二行：有时间就带上时间/模式，再跟概要首行（新记录里是速率）
         LinearLayout mid = Ui.row(this);
         mid.setPadding(0, Ui.dp(this, 4), 0, 0);
-        TextView sum = Ui.text(this, firstLine(it.summary), 11.5f, Ui.GREY, false);
+        String first = firstLine(it.summary);
+        String second = name.isEmpty() ? first
+                : safe(it.title) + (first.isEmpty() ? "" : " · " + first);
+        TextView sum = Ui.text(this, second, 11.5f, Ui.GREY, false);
         sum.setSingleLine(false);
         mid.addView(sum, new LinearLayout.LayoutParams(0,
                 ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
@@ -325,7 +338,9 @@ public class HistoryActivity extends Activity {
 
     private void showDetail(final History.Item it) {
         detailShowing = true;
-        barTitle.setText(detailTitle(it.title));
+        final String label = safe(it.label).trim();
+        final String headTitle = label.isEmpty() ? safe(it.title) : label;
+        barTitle.setText(detailTitle(headTitle));
         content.removeAllViews();
 
         LinearLayout page = Ui.column(this);
@@ -338,12 +353,28 @@ public class HistoryActivity extends Activity {
         LinearLayout body = Ui.column(this);
         body.setPadding(Ui.dp(this, 12), Ui.dp(this, 12), Ui.dp(this, 12), 0);
 
-        LinearLayout head = Ui.card(this, safe(it.title));
+        LinearLayout head = Ui.card(this, headTitle);
+        addLabelRow(head, it);
         addRow(head, "开始", safe(it.startedAt));
         addRow(head, "结束", safe(it.finishedAt));
         addRow(head, "角色", "server".equals(it.role) ? "接收" : "发送");
         addRow(head, "模式", modeName(it.mode));
         body.addView(head);
+
+        // 结果卡只对客户端记录有意义（服务端历史没有结果包）
+        final Stats st = Stats.ofBundle(it.bundle);
+        final String compareText;
+        if (st != null && st.hasData()) {
+            Compare.Hit hit = Compare.previous(this, it.mode, st, it.id, it.startedAt);
+            compareText = Compare.line(hit, st);
+            body.addView(resultCard(st, compareText));
+            View dev = deviceCard(it.bundle);
+            if (dev != null) {
+                body.addView(dev);
+            }
+        } else {
+            compareText = "";
+        }
 
         LinearLayout sumCard = Ui.card(this, "概要");
         String summary = it.summary == null ? "" : it.summary;
@@ -417,11 +448,193 @@ public class HistoryActivity extends Activity {
                 ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
         flp.leftMargin = Ui.dp(this, 8);
         btns.addView(full, flp);
+        Button share = Ui.ghost(this, "分享摘要", new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                if (st == null || !st.hasData()) {
+                    Toast.makeText(HistoryActivity.this,
+                            "这条记录没有结果数据，只能复制或全屏看日志",
+                            Toast.LENGTH_SHORT).show();
+                    return;
+                }
+                String sub = safe(it.startedAt) + " · " + modeName(it.mode) + " · "
+                        + ("server".equals(it.role) ? "接收" : "发送");
+                Share.send(HistoryActivity.this,
+                        Share.text(safe(it.label), sub, st, compareText));
+            }
+        });
+        LinearLayout.LayoutParams slp = new LinearLayout.LayoutParams(0,
+                ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+        slp.leftMargin = Ui.dp(this, 8);
+        btns.addView(share, slp);
         logCard.addView(btns, Ui.fill());
 
         page.addView(logCard);
         content.addView(page, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+    }
+
+    /** 详情页的标签行：显示当前标签，右侧可直接加/改。 */
+    private void addLabelRow(LinearLayout parent, final History.Item it) {
+        String name = safe(it.label).trim();
+        LinearLayout row = Ui.row(this);
+        row.setPadding(0, Ui.dp(this, 2), 0, 0);
+        TextView value = Ui.text(this, "标签 " + (name.isEmpty() ? "（未命名）" : name),
+                12.5f, name.isEmpty() ? Ui.GREY : Ui.INK, !name.isEmpty());
+        row.addView(value, new LinearLayout.LayoutParams(0,
+                ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        TextView edit = Ui.text(this, name.isEmpty() ? "加标签" : "改标签", 11.5f, Ui.BLUE, true);
+        edit.setPadding(Ui.dp(this, 8), 0, 0, 0);
+        edit.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                showLabelDialog(it);
+            }
+        });
+        row.addView(edit, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        parent.addView(row, Ui.fill());
+    }
+
+    private void showLabelDialog(final History.Item it) {
+        final EditText input = Ui.input(this, safe(it.label), 0);
+        // Ui.input 带的是 weight 参数，直接放进对话框会宽度为 0
+        LinearLayout box = Ui.column(this);
+        box.setPadding(Ui.dp(this, 20), Ui.dp(this, 4), Ui.dp(this, 20), 0);
+        box.addView(input, Ui.fill());
+        new AlertDialog.Builder(this)
+                .setTitle("给这条记录加标签")
+                .setView(box)
+                .setPositiveButton("保存", new DialogInterface.OnClickListener() {
+                    @Override
+                    public void onClick(DialogInterface d, int which) {
+                        String label = input.getText().toString().trim();
+                        if (!History.updateLabel(HistoryActivity.this, it.id, label)) {
+                            Toast.makeText(HistoryActivity.this, "保存失败",
+                                    Toast.LENGTH_SHORT).show();
+                            return;
+                        }
+                        History.Item fresh = History.load(HistoryActivity.this, it.id);
+                        if (fresh != null) {
+                            showDetail(fresh);
+                        } else {
+                            showList();
+                        }
+                    }
+                })
+                .setNegativeButton("取消", null)
+                .show();
+    }
+
+    /** 详情页里的结果卡：主数字 + 关键统计 + 结论 + 与上次同参数对比。 */
+    private View resultCard(Stats st, String compareText) {
+        LinearLayout card = Ui.card(this, "结果");
+        LinearLayout hero = Ui.row(this);
+        LinearLayout left = Ui.column(this);
+        left.addView(Ui.text(this, st.receiverMb >= 0 ? "接收端" : "平均速率",
+                11f, Ui.GREY, false), Ui.fill());
+        LinearLayout valueRow = Ui.row(this);
+        valueRow.addView(Ui.text(this, Stats.fmtMb(st.mainMb()), 28f, Ui.INK, true));
+        TextView unit = Ui.text(this, "Mb/s", 11f, Ui.GREY, false);
+        unit.setPadding(Ui.dp(this, 5), 0, 0, Ui.dp(this, 2));
+        unit.setGravity(Gravity.BOTTOM);
+        valueRow.addView(unit, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        left.addView(valueRow, Ui.fill());
+        hero.addView(left, new LinearLayout.LayoutParams(0,
+                ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+
+        LinearLayout right = Ui.column(this);
+        right.setGravity(Gravity.END);
+        right.addView(Ui.text(this, "发送端 "
+                + (st.senderMb >= 0 ? Stats.fmtMb(st.senderMb) : "--"), 11.5f, Ui.INK, false));
+        right.addView(Ui.text(this, "最低 " + Stats.fmtMb(st.minMb)
+                + " · 最高 " + Stats.fmtMb(st.maxMb), 11.5f, Ui.INK, false));
+        hero.addView(right, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        card.addView(hero, Ui.fill());
+
+        StringBuilder line = new StringBuilder("平均 ").append(Stats.fmtMb(st.avgMb));
+        if (st.retr >= 0) {
+            line.append(" · 重传 ").append(st.retr);
+        }
+        if (st.lostPct >= 0) {
+            line.append(" · 丢包 ").append(Stats.fmtPct(st.lostPct)).append("%");
+        }
+        if (st.jitter >= 0) {
+            line.append(" · 抖动 ").append(Stats.fmtPct(st.jitter)).append("ms");
+        }
+        TextView detail = Ui.text(this, line.toString(), 11.5f, Ui.GREY, false);
+        detail.setPadding(0, Ui.dp(this, 6), 0, 0);
+        card.addView(detail, Ui.fill());
+
+        int level = st.level(st.linkMbps);
+        int bg = level == 2 ? 0xFFFBEAEA : level == 1 ? 0xFFFFF6E5 : 0xFFE7F4E9;
+        int fg = level == 2 ? Ui.RED : level == 1 ? AMBER : Ui.GREEN;
+        TextView verdict = Ui.text(this, st.verdict(st.linkMbps), 12f, fg, false);
+        verdict.setLineSpacing(Ui.dp(this, 1), 1f);
+        verdict.setPadding(Ui.dp(this, 8), Ui.dp(this, 6), Ui.dp(this, 8), Ui.dp(this, 6));
+        verdict.setBackground(Ui.round(this, bg, 0, 9f));
+        LinearLayout.LayoutParams vlp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        vlp.topMargin = Ui.dp(this, 10);
+        card.addView(verdict, vlp);
+
+        if (compareText != null && !compareText.isEmpty()) {
+            TextView cmp = Ui.text(this, "对比：" + compareText, 11.5f, Ui.BLUE, false);
+            cmp.setPadding(0, Ui.dp(this, 9), 0, 0);
+            card.addView(cmp, Ui.fill());
+        }
+        return card;
+    }
+
+    /** 结果包里带的发起端设备信息，能解析多少显示多少。 */
+    private View deviceCard(String json) {
+        try {
+            JSONObject o = new JSONObject(json);
+            JSONArray devices = o.optJSONArray("devices");
+            if (devices == null || devices.length() == 0) {
+                return null;
+            }
+            JSONObject d = devices.optJSONObject(0);
+            if (d == null) {
+                return null;
+            }
+            LinearLayout card = Ui.card(this, "设备信息（发起端）");
+            String model = safe(d.optString("model"));
+            String android = safe(d.optString("android"));
+            if (!model.isEmpty()) {
+                addRow(card, "型号", model
+                        + (android.isEmpty() ? "" : " · Android " + android));
+            }
+            JSONObject w = d.optJSONObject("wifi");
+            if (w != null) {
+                String ssid = safe(w.optString("ssid"));
+                String band = safe(w.optString("band"));
+                int ch = w.optInt("channel", 0);
+                String wifi = ssid + (band.isEmpty() ? "" : (ssid.isEmpty() ? "" : " · ") + band)
+                        + (ch > 0 ? " ch" + ch : "");
+                if (!wifi.trim().isEmpty()) {
+                    addRow(card, "WiFi", wifi);
+                }
+                int rssi = w.optInt("rssi", 0);
+                double link = w.optDouble("link_tx_mbps", -1);
+                if (rssi != 0 || link > 0) {
+                    StringBuilder s = new StringBuilder();
+                    if (rssi != 0) {
+                        s.append(rssi).append(" dBm");
+                    }
+                    if (link > 0) {
+                        s.append(s.length() == 0 ? "" : " · ")
+                                .append("协商 ").append(Stats.fmtMb(link)).append(" Mbps");
+                    }
+                    addRow(card, "信号", s.toString());
+                }
+            }
+            return card;
+        } catch (Exception e) {
+            return null;
+        }
     }
 
     /** 详情卡里的一行「标签 值」。 */

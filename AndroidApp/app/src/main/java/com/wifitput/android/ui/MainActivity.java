@@ -7,11 +7,15 @@ import android.graphics.Color;
 import android.view.Gravity;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
+import android.os.SystemClock;
 import android.widget.HorizontalScrollView;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 
 import com.wifitput.android.core.Dev;
+import com.wifitput.android.core.Prefs;
 import com.wifitput.android.core.Qr;
 import com.wifitput.android.core.Upload;
 
@@ -19,15 +23,35 @@ import org.json.JSONObject;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 
-public class MainActivity extends Activity {
+public class MainActivity extends Activity implements TabPanel.StatusSink {
 
     private static final int REQ_PERM = 1101;
 
     private final List<TabPanel> panels = new ArrayList<TabPanel>();
     private final List<TextView> tabViews = new ArrayList<TextView>();
     private TextView status;
+    private TextView runStatus;
     private int current;
+
+    /** 顶栏全局状态：哪个页签在跑、跑了多久。切页签也不丢。 */
+    private final Handler ticker = new Handler(Looper.getMainLooper());
+    private TabPanel activePanel;
+    private boolean activeClientRun;
+    private final Runnable tick = new Runnable() {
+        @Override
+        public void run() {
+            if (activePanel == null || !activePanel.isBusy()) {
+                runStatus.setVisibility(android.view.View.GONE);
+                return;
+            }
+            refreshRunText();
+            if (activeClientRun) {
+                ticker.postDelayed(this, 1000);
+            }
+        }
+    };
 
     @Override
     protected void onCreate(Bundle b) {
@@ -42,6 +66,7 @@ public class MainActivity extends Activity {
                 LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f));
         for (String mode : new String[]{"wifi", "hotspot", "p2p"}) {
             TabPanel p = new TabPanel(this, mode);
+            p.setStatusSink(this);
             p.setVisibility(mode.equals("wifi") ? android.view.View.VISIBLE : android.view.View.GONE);
             panels.add(p);
             body.addView(p, new android.widget.FrameLayout.LayoutParams(
@@ -56,7 +81,7 @@ public class MainActivity extends Activity {
 
     private LinearLayout buildHeader() {
         LinearLayout head = Ui.column(this);
-        head.setBackgroundColor(Ui.BLUE);
+        head.setBackground(Ui.headerBg(this));
         head.setPadding(Ui.dp(this, 14), Ui.dp(this, 12), Ui.dp(this, 14), Ui.dp(this, 0));
 
         // 标题行右侧放「⋯」：历史和 PC 回传设置都是低频操作，塞进菜单里不占 Tab 位置
@@ -77,6 +102,17 @@ public class MainActivity extends Activity {
         });
         titleRow.addView(more);
         head.addView(titleRow);
+
+        // 全局运行状态：不管当前停在哪个页签，都能看到哪台在打流、跑了多久
+        runStatus = Ui.text(this, "", 11.5f, Color.WHITE, true);
+        runStatus.setGravity(Gravity.CENTER);
+        runStatus.setPadding(Ui.dp(this, 9), Ui.dp(this, 3), Ui.dp(this, 9), Ui.dp(this, 3));
+        runStatus.setBackground(Ui.round(this, 0x33FFFFFF, 0, 8f));
+        runStatus.setVisibility(android.view.View.GONE);
+        LinearLayout.LayoutParams rlp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        rlp.topMargin = Ui.dp(this, 5);
+        head.addView(runStatus, rlp);
 
         status = Ui.text(this, "", 11.5f, 0xFFD6E6FA, false);
         status.setPadding(0, Ui.dp(this, 3), 0, Ui.dp(this, 8));
@@ -149,7 +185,7 @@ public class MainActivity extends Activity {
             refreshStatus();
             return;
         }
-        List<String> want = new ArrayList<String>();
+        final List<String> want = new ArrayList<String>();
         add(want, android.Manifest.permission.ACCESS_FINE_LOCATION);
         // 扫码配对要用相机；不授权也能用「扫描对端」和手工填地址
         add(want, android.Manifest.permission.CAMERA);
@@ -161,7 +197,90 @@ public class MainActivity extends Activity {
             refreshStatus();
             return;
         }
+        // 第一次先解释再申请：位置权限在 Android 上是读 WiFi 名称/信号用的，
+        // 不解释的话用户很容易以为在偷偷定位。
+        if (!Prefs.getBool(this, "perm_intro_shown", false)) {
+            new AlertDialog.Builder(this)
+                    .setTitle("需要几项系统权限")
+                    .setMessage("位置：读取 WiFi 名称、频段和信号强度（Android 的限制，不用于定位）。\n"
+                            + "相机：扫投屏码，配对 P2P 时用。\n"
+                            + "附近设备（Android 13+）：搜索 Wi-Fi Direct 对端。\n\n"
+                            + "不授权也能用「扫描对端」或手工填地址测速。")
+                    .setPositiveButton("继续", new android.content.DialogInterface.OnClickListener() {
+                        @Override
+                        public void onClick(android.content.DialogInterface d, int which) {
+                            Prefs.putBool(MainActivity.this, "perm_intro_shown", true);
+                            requestPermissions(want.toArray(new String[0]), REQ_PERM);
+                        }
+                    })
+                    .setNegativeButton("稍后", new android.content.DialogInterface.OnClickListener() {
+                        @Override
+                        public void onClick(android.content.DialogInterface d, int which) {
+                            Prefs.putBool(MainActivity.this, "perm_intro_shown", true);
+                            refreshStatus();
+                        }
+                    })
+                    .show();
+            return;
+        }
         requestPermissions(want.toArray(new String[0]), REQ_PERM);
+    }
+
+    @Override
+    public void onStatus(TabPanel p, boolean active, boolean clientRun) {
+        if (!active) {
+            // 不是当前显示的那个页签收尾，不影响顶栏
+            if (p != activePanel) {
+                return;
+            }
+            // 一个页签停了但另一个还在跑：接着显示另一个
+            TabPanel other = null;
+            for (TabPanel x : panels) {
+                if (x != p && x.isBusy()) {
+                    other = x;
+                    break;
+                }
+            }
+            if (other != null) {
+                activePanel = other;
+                activeClientRun = other.isClientRun();
+                runStatus.setVisibility(android.view.View.VISIBLE);
+                refreshRunText();
+                ticker.removeCallbacks(tick);
+                if (activeClientRun) {
+                    ticker.post(tick);
+                }
+                return;
+            }
+            activePanel = null;
+            ticker.removeCallbacks(tick);
+            runStatus.setVisibility(android.view.View.GONE);
+            return;
+        }
+        activePanel = p;
+        activeClientRun = clientRun;
+        ticker.removeCallbacks(tick);
+        runStatus.setVisibility(android.view.View.VISIBLE);
+        refreshRunText();
+        if (clientRun) {
+            ticker.post(tick);
+        }
+    }
+
+    /** 顶栏文字：打流时带计时，服务端就绪不带。 */
+    private void refreshRunText() {
+        if (activePanel == null) {
+            return;
+        }
+        String name = activePanel.modeTitle();
+        if (activeClientRun) {
+            long sec = Math.max(0,
+                    (SystemClock.elapsedRealtime() - activePanel.runStartMs()) / 1000);
+            runStatus.setText(name + " · 打流中 "
+                    + String.format(Locale.US, "%02d:%02d", sec / 60, sec % 60));
+        } else {
+            runStatus.setText(name + " · 服务端就绪");
+        }
     }
 
     private void add(List<String> want, String p) {
@@ -238,6 +357,7 @@ public class MainActivity extends Activity {
 
     @Override
     protected void onDestroy() {
+        ticker.removeCallbacks(tick);
         for (TabPanel p : panels) {
             if (!p.isBusy()) {
                 p.stopAll();

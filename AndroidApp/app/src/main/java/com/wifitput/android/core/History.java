@@ -35,6 +35,7 @@ public class History {
     public static class Item {
         public String id = "";        // 文件名去掉 .json
         public String title = "";     // 形如「WiFi · 2026-11-03 10:24:05」/「热点 · 接收 · 2026-11-03 10:24:05」
+        public String label = "";     // 用户起的标签，如「客厅」「换信道后」；老记录为空
         public String mode = "";      // wifi / hotspot / p2p
         public String role = "client"; // client / server
         public String startedAt = "";
@@ -125,7 +126,8 @@ public class History {
      * 写盘失败抛 RuntimeException —— 历史存不下要让用户看见，不能悄悄吞掉。
      */
     public static String save(Context ctx, String mode, String role, String startedAt,
-                              String finishedAt, String summary, String log, String bundleJson) {
+                              String finishedAt, String summary, String log, String bundleJson,
+                              String label) {
         String m = mode == null || mode.trim().isEmpty() ? "wifi" : mode.trim();
         String r = "server".equals(role) ? "server" : "client";
         String start = startedAt == null ? "" : startedAt.trim();
@@ -140,6 +142,7 @@ public class History {
         try {
             o.put("id", id);
             o.put("title", title(m, r, start));
+            o.put("label", label == null ? "" : label.trim());
             o.put("mode", m);
             o.put("role", r);
             o.put("started_at", start);
@@ -200,6 +203,30 @@ public class History {
         return parse(f);
     }
 
+    /** 给一条历史补/改标签；记录不存在或写失败返回 false。 */
+    public static boolean updateLabel(Context ctx, String id, String label) {
+        if (id == null || id.trim().isEmpty()) {
+            return false;
+        }
+        File f = new File(dir(ctx), id.trim() + EXT);
+        if (!f.exists()) {
+            return false;
+        }
+        try {
+            JSONObject o = new JSONObject(read(f));
+            o.put("label", label == null ? "" : label.trim());
+            write(f, o.toString());
+            try {
+                syncToExternal(ctx);
+            } catch (Exception ignored) {
+                // 镜像失败不影响私有目录那份
+            }
+            return true;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
     public static void delete(Context ctx, String id) {
         if (id == null || id.trim().isEmpty()) {
             return;
@@ -255,6 +282,7 @@ public class History {
             Item it = new Item();
             it.id = name.substring(0, name.length() - EXT.length());
             it.title = o.optString("title", it.id);
+            it.label = o.optString("label", "");
             it.mode = o.optString("mode", "");
             it.role = o.optString("role", "client");
             it.startedAt = o.optString("started_at", "");

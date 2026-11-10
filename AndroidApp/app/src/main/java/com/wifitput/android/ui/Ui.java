@@ -24,10 +24,10 @@ final class Ui {
     static final int RED = 0xFFC62828;
     static final int INK = 0xFF212121;
 
-    static final int PAGE_BG = 0xFFF2F4F7;
-    static final int CARD_LINE = 0xFFE4E8EE;
+    static final int PAGE_BG = 0xFFF4F6F9;
+    static final int CARD_LINE = 0xFFE7EBF1;
     static final int FIELD_BG = 0xFFF5F7FA;
-    static final int CHIP_BG = 0xFFEFF2F7;
+    static final int CHIP_BG = 0xFFEFF3F8;
     static final int CHIP_LINE = 0xFFDCE3ED;
 
     private Ui() {
@@ -110,11 +110,12 @@ final class Ui {
     /** 白色圆角卡片，返回容器，调用方往里塞内容。title 为 null 时不出标题。 */
     static LinearLayout card(Context c, String title) {
         LinearLayout box = column(c);
-        box.setBackground(round(c, Color.WHITE, CARD_LINE, 12f));
-        box.setPadding(dp(c, 12), dp(c, 9), dp(c, 12), dp(c, 11));
+        box.setBackground(round(c, Color.WHITE, CARD_LINE, 14f));
+        box.setPadding(dp(c, 13), dp(c, 11), dp(c, 13), dp(c, 13));
+        box.setElevation(dp(c, 1f));
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        lp.bottomMargin = dp(c, 9);
+        lp.bottomMargin = dp(c, 10);
         box.setLayoutParams(lp);
         if (title != null && title.length() > 0) {
             box.addView(cardTitle(c, title));
@@ -122,10 +123,16 @@ final class Ui {
         return box;
     }
 
+    /** 顶栏渐变背景，比纯色更有层次。 */
+    static GradientDrawable headerBg(Context c) {
+        return new GradientDrawable(GradientDrawable.Orientation.TL_BR,
+                new int[]{0xFF1E7BD6, 0xFF0D47A1});
+    }
+
     /** 把已有的自定义控件（热点面板、P2P 面板）套成和卡片一样的外观。 */
     static void cardify(Context c, View v) {
-        v.setBackground(round(c, Color.WHITE, CARD_LINE, 12f));
-        v.setPadding(dp(c, 12), dp(c, 9), dp(c, 12), dp(c, 11));
+        v.setBackground(round(c, Color.WHITE, CARD_LINE, 14f));
+        v.setPadding(dp(c, 13), dp(c, 11), dp(c, 13), dp(c, 13));
     }
 
     /** 主按钮：蓝底白字。 */
@@ -134,10 +141,10 @@ final class Ui {
         b.setTextColor(Color.WHITE);
         b.setTextSize(15f);
         b.setTypeface(Typeface.DEFAULT_BOLD);
-        b.setBackground(pressed(c, BLUE, BLUE_DARK, 0, 10f));
+        b.setBackground(pressed(c, BLUE, BLUE_DARK, 0, 12f));
         b.setPadding(dp(c, 10), dp(c, 8), dp(c, 10), dp(c, 8));
-        b.setMinHeight(dp(c, 42));
-        b.setMinimumHeight(dp(c, 42));
+        b.setMinHeight(dp(c, 44));
+        b.setMinimumHeight(dp(c, 44));
         return b;
     }
 
@@ -146,10 +153,10 @@ final class Ui {
         Button b = button(c, s, l);
         b.setTextColor(BLUE);
         b.setTextSize(14f);
-        b.setBackground(pressed(c, Color.WHITE, 0xFFEDF3FB, CHIP_LINE, 10f));
+        b.setBackground(pressed(c, Color.WHITE, 0xFFEDF3FB, CHIP_LINE, 12f));
         b.setPadding(dp(c, 10), dp(c, 8), dp(c, 10), dp(c, 8));
-        b.setMinHeight(dp(c, 42));
-        b.setMinimumHeight(dp(c, 42));
+        b.setMinHeight(dp(c, 44));
+        b.setMinimumHeight(dp(c, 44));
         return b;
     }
 
@@ -158,10 +165,10 @@ final class Ui {
         Button b = button(c, s, l);
         b.setTextColor(INK);
         b.setTextSize(13.5f);
-        b.setBackground(pressed(c, CHIP_BG, 0xFFE2E8F1, CHIP_LINE, 10f));
+        b.setBackground(pressed(c, CHIP_BG, 0xFFE2E8F1, CHIP_LINE, 12f));
         b.setPadding(dp(c, 10), dp(c, 8), dp(c, 10), dp(c, 8));
-        b.setMinHeight(dp(c, 42));
-        b.setMinimumHeight(dp(c, 42));
+        b.setMinHeight(dp(c, 44));
+        b.setMinimumHeight(dp(c, 44));
         return b;
     }
 

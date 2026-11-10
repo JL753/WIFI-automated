@@ -1,7 +1,10 @@
 package com.wifitput.android.ui;
 
+import android.app.AlertDialog;
 import android.content.Context;
+import android.content.DialogInterface;
 import android.graphics.Color;
+import android.os.SystemClock;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
@@ -11,11 +14,15 @@ import android.widget.LinearLayout;
 import android.widget.TextView;
 
 import com.wifitput.android.core.Bundle;
+import com.wifitput.android.core.Compare;
 import com.wifitput.android.core.Discovery;
+import com.wifitput.android.core.History;
 import com.wifitput.android.core.Prefs;
 import com.wifitput.android.core.Qr;
 import com.wifitput.android.core.Record;
+import com.wifitput.android.core.Stats;
 
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -25,10 +32,25 @@ import java.util.List;
  */
 class TabPanel extends android.widget.ScrollView implements Session.Listener, AddrSink {
 
+    /** 主界面顶栏的全局状态：哪个页签在跑、是打流还是当服务端。 */
+    interface StatusSink {
+        void onStatus(TabPanel p, boolean active, boolean clientRun);
+    }
+
     final String mode;
     private final Session session;
     private final LogBox log;
     private final RateChart chart;
+    private final ResultCard resultCard;
+    private final EditText labelInput;
+    private final TextView nextHint;
+    private StatusSink sink;
+    /** 连测：总次数、当前第几次、已经完成的各次统计。 */
+    private int repeatTotal = 1;
+    private int repeatIndex = 1;
+    private final List<Stats> repeatStats = new ArrayList<Stats>();
+    private long runStartMs;
+    private String lastShareText = "";
     private final EditText host;
     private final EditText port;
     private final EditText duration;
@@ -83,6 +105,9 @@ class TabPanel extends android.widget.ScrollView implements Session.Listener, Ad
 
         log = new LogBox(c);
         chart = new RateChart(c);
+        resultCard = new ResultCard(c);
+        labelInput = Ui.input(c, Prefs.getStr(c, "run_label", ""), 0);
+        labelInput.setHint("例如：客厅 / 换信道后");
 
         // 卡片 1：这一台干什么
         LinearLayout c1 = Ui.card(c, "这一台干什么");
@@ -106,6 +131,10 @@ class TabPanel extends android.widget.ScrollView implements Session.Listener, Ad
         c1.addView(roleRow);
         serveHint = Ui.hint(c, serveHintText());
         c1.addView(serveHint);
+        // 「下一步该点哪」随状态变化，两台手机来回换角色时不至于迷路
+        nextHint = Ui.text(c, "", 12f, Ui.BLUE, true);
+        nextHint.setPadding(0, Ui.dp(c, 6), 0, 0);
+        c1.addView(nextHint, Ui.fill());
         root.addView(c1);
 
         // 卡片 2：对端地址（可收起）
@@ -238,25 +267,30 @@ class TabPanel extends android.widget.ScrollView implements Session.Listener, Ad
         // 卡片 5：开始 + 实时数据（合并成一张，页面更紧凑）
         // 结果回传的 PC 地址不在这里配了，统一走顶栏「⋯ → 设置结果回传 PC」
         LinearLayout c6 = Ui.card(c, "运行");
+
+        // 标签在开始前填：位置、场景，随结果一起进历史，方便事后对比
+        LinearLayout labelCol = Ui.column(c);
+        TextView labelTitle = Ui.text(c, "本次标签（可选，例如：客厅 / 换信道后）", 11.5f, Ui.GREY, false);
+        labelTitle.setPadding(Ui.dp(c, 2), 0, 0, Ui.dp(c, 3));
+        labelCol.addView(labelTitle, Ui.fill());
+        labelCol.addView(labelInput, Ui.fill());
+        LinearLayout.LayoutParams labelLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        labelLp.bottomMargin = Ui.dp(c, 10);
+        c6.addView(labelCol, labelLp);
+
         LinearLayout runRow = Ui.row(c);
         runBtn = Ui.primary(c, "开始打流", new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                if (session.running()) {
-                    session.stopServing();
-                    setBusy(false, "已停止");
+                if (session.running() || busy) {
+                    stopRun();
                     return;
                 }
-                if (!pullParams()) {
-                    return;
-                }
-                session.savePrefs();
-                setBusy(true, "打流中…");
-                chart.reset(session.duration);
-                session.runOnce();
+                startRun(1);
             }
         });
-        uploadBtn = Ui.ghost(c, "重发上一次", new View.OnClickListener() {
+        uploadBtn = Ui.ghost(c, "重传上次结果", new View.OnClickListener() {
             @Override
             public void onClick(View v) {
                 if (last == null) {
@@ -284,18 +318,236 @@ class TabPanel extends android.widget.ScrollView implements Session.Listener, Ad
         runRow.addView(fullBtn, Ui.w(0.62f));
         Ui.margin(c, fullBtn, 8, 0, 0, 0);
         c6.addView(runRow);
+
         // 实时速率曲线压在日志上方：先看走势，再看逐行明细
         Ui.margin(c, chart, 0, 12, 0, 0);
         c6.addView(chart);
+
+        // 跑完的结果卡：主数字、结论、与上次同参数对比、复测/分享
+        Ui.margin(c, resultCard, 0, 10, 0, 0);
+        c6.addView(resultCard);
+        resultCard.setActions(new ResultCard.Actions() {
+            @Override
+            public void onAgain() {
+                if (!session.running() && !busy) {
+                    startRun(1);
+                }
+            }
+
+            @Override
+            public void onRepeat() {
+                if (!session.running() && !busy) {
+                    startRun(3);
+                }
+            }
+
+            @Override
+            public void onShare() {
+                shareLast();
+            }
+
+            @Override
+            public void onLabel() {
+                editLabel();
+            }
+        });
+
         Ui.margin(c, log, 0, 8, 0, 0);
         c6.addView(log);
         root.addView(c6);
 
         addView(root);
         log.add("-- " + modeTitle() + " 就绪。" + session.myHint());
+        updateNextHint();
     }
 
-    private String modeTitle() {
+    // ---------------------------------------------------------------- 运行
+
+    /** 按当前参数开始一轮；repeatCount > 1 时连续跑。 */
+    private void startRun(int repeatCount) {
+        if (session.serving()) {
+            log.add("!! 先停掉服务端再开始打流");
+            return;
+        }
+        if (!pullParams()) {
+            return;
+        }
+        if (session.host == null || session.host.trim().isEmpty()) {
+            log.add("!! 先填对端地址 —— 点「扫描对端」，让对方先点「当服务端」");
+            updateNextHint();
+            return;
+        }
+        session.savePrefs();
+        String label = labelInput.getText().toString().trim();
+        Prefs.putStr(c(), "run_label", label);
+        session.label = label;
+        repeatTotal = Math.max(1, repeatCount);
+        repeatIndex = 1;
+        repeatStats.clear();
+        runStartMs = SystemClock.elapsedRealtime();
+        setBusy(true, repeatTotal > 1 ? "打流中 1/" + repeatTotal + "…" : "打流中…");
+        chart.reset(session.duration);
+        resultCard.hide();
+        updateNextHint();
+        notifyStatus(true, true);
+        session.runOnce();
+    }
+
+    private void stopRun() {
+        removeCallbacks(nextRepeat);
+        boolean wasServing = session.serving();
+        repeatTotal = 1;
+        session.stopServing();
+        if (wasServing) {
+            serveBtn.setText("当服务端");
+            setBusy(false, "服务端已停止");
+            setServeUi(false);
+            chart.finish();
+            showServerResult();
+        } else {
+            setBusy(false, "已停止");
+        }
+        updateNextHint();
+        notifyStatus(false, false);
+    }
+
+    private final Runnable nextRepeat = new Runnable() {
+        @Override
+        public void run() {
+            if (!busy) {
+                return;
+            }
+            runStartMs = SystemClock.elapsedRealtime();
+            chart.reset(session.duration);
+            session.runOnce();
+        }
+    };
+
+    private void shareLast() {
+        if (lastShareText == null || lastShareText.isEmpty()) {
+            log.add("!! 还没有可分享的结果");
+            return;
+        }
+        Share.send(c(), lastShareText);
+    }
+
+    /** 结果卡上的「加标签」：补一个标签并写回刚存下的那条历史。 */
+    private void editLabel() {
+        final EditText input = Ui.input(c(), labelInput.getText().toString(), 0);
+        // Ui.input 默认是带 weight 的 LinearLayout 参数，直接塞进对话框会宽度为 0
+        LinearLayout box = Ui.column(c());
+        box.setPadding(Ui.dp(c(), 20), Ui.dp(c(), 4), Ui.dp(c(), 20), 0);
+        box.addView(input, Ui.fill());
+        new AlertDialog.Builder(c())
+                .setTitle("给这次结果加标签")
+                .setView(box)
+                .setPositiveButton("保存", new DialogInterface.OnClickListener() {
+                    @Override
+                    public void onClick(DialogInterface d, int which) {
+                        String s = input.getText().toString().trim();
+                        labelInput.setText(s);
+                        Prefs.putStr(c(), "run_label", s);
+                        session.label = s;
+                        if (!session.lastHistoryId().isEmpty()) {
+                            History.updateLabel(c(), session.lastHistoryId(), s);
+                        }
+                        resultCard.setLabel(s);
+                    }
+                })
+                .setNegativeButton("取消", null)
+                .show();
+    }
+
+    /** 服务端停服后：把这一轮收到的记录也出一张结果卡。 */
+    private void showServerResult() {
+        List<Record> recs = session.serveRecords();
+        Stats st = Stats.ofRecords(recs);
+        if (st != null && st.hasData()) {
+            String subtitle = "服务端 · 收到 " + recs.size() + " 行逐秒数据";
+            resultCard.show(st, session.label, subtitle, "", "", false);
+            lastShareText = Share.text(session.label, subtitle, st, "");
+        } else {
+            resultCard.hide();
+            lastShareText = "";
+        }
+    }
+
+    /** 连测时的汇总：中位数 + 区间。 */
+    private String aggregateText() {
+        List<Double> vals = new ArrayList<Double>();
+        for (Stats s : repeatStats) {
+            if (s != null && s.hasData() && s.mainMb() >= 0) {
+                vals.add(s.mainMb());
+            }
+        }
+        if (vals.size() < 2) {
+            return "";
+        }
+        java.util.Collections.sort(vals);
+        int n = vals.size();
+        double median = n % 2 == 1 ? vals.get(n / 2)
+                : (vals.get(n / 2 - 1) + vals.get(n / 2)) / 2.0;
+        return n + " 次中位数 " + Stats.fmtMb(median) + " Mb/s（最低 "
+                + Stats.fmtMb(vals.get(0)) + " · 最高 " + Stats.fmtMb(vals.get(n - 1)) + "）";
+    }
+
+    /** 结果卡的内容：标签、参数、与同参数上一次的对比、连测汇总。 */
+    private void showResult(Bundle bundle, Stats stats, boolean interim, int doneIndex) {
+        if (stats == null || !stats.hasData()) {
+            resultCard.hide();
+            lastShareText = "";
+            return;
+        }
+        String label = session.label == null ? "" : session.label.trim();
+        String time = bundle != null && bundle.startedAt != null && bundle.startedAt.length() >= 19
+                ? bundle.startedAt.substring(11) : "";
+        String subtitle = (time.isEmpty() ? "" : time + " · ")
+                + session.kind + (session.reverse ? " 反向" : " 正向")
+                + " · " + session.streams + " 流 · " + session.duration + " 秒"
+                + (interim ? " · 第 " + doneIndex + "/" + repeatTotal + " 次" : "");
+        String compareText = "";
+        if (!interim && repeatTotal == 1 && bundle != null) {
+            Compare.Hit hit = Compare.previous(c(), mode, stats,
+                    session.lastHistoryId(), bundle.startedAt);
+            compareText = Compare.line(hit, stats);
+        }
+        String agg = !interim ? aggregateText() : "";
+        resultCard.show(stats, label, subtitle, compareText, agg, !interim);
+        lastShareText = Share.text(label, subtitle, stats,
+                compareText + (agg.isEmpty() ? "" : "\n" + agg));
+    }
+
+    /** 「下一步点哪」随状态更新。 */
+    private void updateNextHint() {
+        String s;
+        if (session.serving()) {
+            s = "服务端就绪：另一台点「扫描对端」，或手工填地址后开始打流";
+        } else if (busy) {
+            // 服务端用的是同一个 worker，不能用 session.running() 判断「在打流」
+            s = "打流中，曲线和日志实时更新";
+        } else if (host.getText().toString().trim().isEmpty()) {
+            s = "下一步：另一台点「当服务端」，这台点「扫描对端」";
+        } else {
+            s = "下一步：点下面的「开始打流」（对端 " + host.getText().toString().trim() + "）";
+        }
+        nextHint.setText("→ " + s);
+    }
+
+    void setStatusSink(StatusSink s) {
+        sink = s;
+    }
+
+    private void notifyStatus(boolean active, boolean clientRun) {
+        if (sink != null) {
+            sink.onStatus(this, active, clientRun);
+        }
+    }
+
+    long runStartMs() {
+        return runStartMs;
+    }
+
+    String modeTitle() {
         if ("hotspot".equals(mode)) {
             return "热点吞吐";
         }
@@ -335,7 +587,7 @@ class TabPanel extends android.widget.ScrollView implements Session.Listener, Ad
     }
 
     private void startScan() {
-        if (session.running() || session.serving()) {
+        if (session.running() || session.serving() || busy) {
             log.add("!! 先停掉正在跑的测试再扫描");
             return;
         }
@@ -383,22 +635,35 @@ class TabPanel extends android.widget.ScrollView implements Session.Listener, Ad
             session.stopServing();
             serveBtn.setText("当服务端");
             setBusy(false, "服务端已停止");
+            setServeUi(false);
             // 停服时把没满一个采样的最后一段也落下来，顺便把空状态文案复位
             chart.finish();
+            showServerResult();
+            updateNextHint();
+            notifyStatus(false, false);
             return;
         }
-        if (session.running()) {
+        // 连测的间隔里 session.running() 是 false，但整批还没结束，不能再切去当服务端
+        if (busy || session.running()) {
             log.add("!! 先停掉正在跑的测试");
             return;
         }
         if (!pullParams()) {
             return;
         }
+        String label = labelInput.getText().toString().trim();
+        Prefs.putStr(c(), "run_label", label);
+        session.label = label;
         session.savePrefs();
         serveBtn.setText("停止服务端");
         setBusy(true, "服务端就绪");
+        setServeUi(true);
         // 当服务端时不知道对方打多久，横轴先按 0 秒起步、随数据往后长
         chart.reset(0);
+        resultCard.hide();
+        // serving 标志是在后台线程里置上的，这里先直接把提示写成服务端状态
+        nextHint.setText("→ 服务端就绪：另一台点「扫描对端」，或手工填地址后开始打流");
+        notifyStatus(true, false);
         session.startServing();
     }
 
@@ -406,11 +671,26 @@ class TabPanel extends android.widget.ScrollView implements Session.Listener, Ad
         return busy;
     }
 
+    /** 当前是不是在打流（而不是当服务端）；连测的间隔里也算。 */
+    boolean isClientRun() {
+        return busy && !session.serving();
+    }
+
+    /** 当服务端时主按钮让位：暂停「开始打流」，避免和「停止服务端」两个入口。 */
+    private void setServeUi(boolean serving) {
+        runBtn.setEnabled(!serving);
+        runBtn.setAlpha(serving ? 0.5f : 1f);
+        runBtn.setText(serving ? "服务端运行中" : (busy ? "停止" : "开始打流"));
+    }
+
     void setBusy(boolean busy, String text) {
         this.busy = busy;
         runBtn.setText(busy ? "停止" : "开始打流");
         scanBtn.setEnabled(!busy);
         scanBtn.setAlpha(busy ? 0.45f : 1f);
+        // 跑的过程中改标签不会影响已经开始的这一轮，锁住避免标签和结果对不上
+        labelInput.setEnabled(!busy);
+        labelInput.setAlpha(busy ? 0.55f : 1f);
         status.setText(text);
         status.setTextColor(busy ? Ui.GREEN : Ui.BLUE);
         status.setBackground(Ui.round(c(), busy ? 0xFFE7F4E9 : 0xFFE8F0FB, 0, 9f));
@@ -478,6 +758,15 @@ class TabPanel extends android.widget.ScrollView implements Session.Listener, Ad
         log.add("OK 对端地址已填入：" + ip + ":" + port);
         status.setText("可以开始打流");
         status.setTextColor(Ui.BLUE);
+        updateNextHint();
+        // 填完地址下一步就是开始，直接把「开始打流」滚进视野，省一次上滑
+        post(new Runnable() {
+            @Override
+            public void run() {
+                runBtn.requestRectangleOnScreen(new android.graphics.Rect(
+                        0, 0, runBtn.getWidth(), runBtn.getHeight()), true);
+            }
+        });
     }
 
     /** 本机第一个可用的 IPv4，用于生成二维码。 */
@@ -525,28 +814,69 @@ class TabPanel extends android.widget.ScrollView implements Session.Listener, Ad
             @Override
             public void run() {
                 log.add(tag == null ? msg : tag + " " + msg);
-                // 当服务端时，这一行说明对方开了新的一轮打流，曲线也要跟着重画
+                // 当服务端时，这一行说明对方开了新的一轮打流，曲线和结果卡都换新的
                 if (msg != null && msg.startsWith("Accepted connection")) {
                     chart.restartOnNextSample();
+                    resultCard.hide();
+                    nextHint.setText("→ 对端已连上，正在接收数据…");
+                }
+                // 服务端起失败时后台线程会自己收尾，界面要跟着复位。
+                // 只有按钮还停在「停止服务端」时才动界面，避免把刚开始的下一轮误停。
+                if ("服务端已停止".equals(msg)
+                        && "停止服务端".equals(serveBtn.getText().toString())) {
+                    serveBtn.setText("当服务端");
+                    if (busy) {
+                        setBusy(false, "服务端已停止");
+                    }
+                    setServeUi(false);
+                    updateNextHint();
+                    notifyStatus(false, false);
                 }
                 if ("XX".equals(tag)) {
                     status.setText("出错，看下面的日志");
                     status.setTextColor(Ui.RED);
                     status.setBackground(Ui.round(c(), 0xFFFBEAEA, 0, 9f));
+                    // 服务端起失败时后台线程不会走 onDone，这里要自己把按钮和顶栏复位
+                    if ("停止服务端".equals(serveBtn.getText().toString())) {
+                        serveBtn.setText("当服务端");
+                        setBusy(false, "服务端启动失败");
+                        setServeUi(false);
+                        updateNextHint();
+                        notifyStatus(false, false);
+                    }
                 }
             }
         });
     }
 
     @Override
-    public void onDone(final Bundle bundle, final String note) {
+    public void onDone(final Bundle bundle, final Stats stats, final String note) {
         last = bundle;
+        final int doneIndex = repeatIndex;
         post(new Runnable() {
             @Override
             public void run() {
                 chart.finish();
+                if (stats != null && stats.hasData()) {
+                    repeatStats.add(stats);
+                }
+                boolean cancelled = note != null && note.contains("停止");
+                if (!cancelled && stats != null && stats.hasData()
+                        && doneIndex < repeatTotal) {
+                    repeatIndex = doneIndex + 1;
+                    setBusy(true, "打流中 " + repeatIndex + "/" + repeatTotal + "…");
+                    showResult(bundle, stats, true, doneIndex);
+                    log.add("-- 第 " + doneIndex + "/" + repeatTotal
+                            + " 次完成，1 秒后开始下一次");
+                    notifyStatus(true, true);
+                    postDelayed(nextRepeat, 1200);
+                    return;
+                }
+                showResult(bundle, stats, false, doneIndex);
                 serveBtn.setText("当服务端");
                 setBusy(false, bundle == null ? "没有结果" : "完成");
+                updateNextHint();
+                notifyStatus(false, false);
                 if (bundle != null) {
                     log.add("-- 结果包已生成：" + bundle.records.size() + " 条逐秒记录");
                 }

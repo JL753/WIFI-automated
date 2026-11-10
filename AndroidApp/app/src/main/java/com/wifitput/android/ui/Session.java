@@ -12,6 +12,7 @@ import com.wifitput.android.core.Iperf;
 import com.wifitput.android.core.KeepAlive;
 import com.wifitput.android.core.Prefs;
 import com.wifitput.android.core.Record;
+import com.wifitput.android.core.Stats;
 import com.wifitput.android.core.Upload;
 
 import org.json.JSONObject;
@@ -31,7 +32,7 @@ class Session {
         /** 一条逐秒数据行，界面拿去画实时速率曲线（工作线程回调，操作控件要 post）。 */
         void onSample(Record rec);
 
-        void onDone(Bundle bundle, String note);
+        void onDone(Bundle bundle, Stats stats, String note);
 
         /** 扫描结束，把扫到的全部对端抛给界面弹窗。空列表表示一个都没找到。 */
         void onPeers(List<Discovery.Peer> peers);
@@ -47,6 +48,8 @@ class Session {
     String kind = "TCP";
     String udpBw = "";
     boolean reverse = false;
+    /** 用户给这次运行起的标签（位置/场景），随历史一起保存。 */
+    String label = "";
 
     private final Context ctx;
     private final Listener listener;
@@ -61,6 +64,10 @@ class Session {
     private volatile String serveLastSum = "";
     /** 停服可能从界面线程和 startServing 的 finally 同时进来，靠这把锁保证只存一条历史。 */
     private final Object serveLock = new Object();
+    /** 服务端当前这一轮收到的逐秒记录，停服时用来出结果卡。 */
+    private final List<Record> serveRecords = new ArrayList<Record>();
+    /** 客户端这次运行存进历史的 id，给结果卡的「加标签」用。 */
+    private String lastHistoryId = "";
 
     Session(Context c, String mode, Listener l) {
         this.ctx = c.getApplicationContext();
@@ -124,6 +131,9 @@ class Session {
         }
         cancelled = false;
         resetRunLog();
+        synchronized (serveRecords) {
+            serveRecords.clear();
+        }
         worker = new Thread(new Runnable() {
             @Override
             public void run() {
@@ -162,11 +172,22 @@ class Session {
                                 if (raw.startsWith("iperf3: error - unable to receive cookie")) {
                                     continue;
                                 }
+                                // 对方开了新的一轮：上一轮的记录不要混进这一轮的结果卡
+                                if (raw.startsWith("Accepted connection")) {
+                                    synchronized (serveRecords) {
+                                        serveRecords.clear();
+                                    }
+                                }
                                 Record rec = Record.of("srv", kind, "", raw, clock());
                                 if (rec != null) {
                                     String pretty = rec.pretty();
                                     line("--", pretty);
                                     listener.onSample(rec);
+                                    synchronized (serveRecords) {
+                                        if (serveRecords.size() < 4000) {
+                                            serveRecords.add(rec);
+                                        }
+                                    }
                                     // 单流时 iperf3 不打 [SUM]，收尾汇总那行是 "[ 5] 0-60.06s ... sender"；
                                     // 多流才打 [SUM]。两种都认：带 SUM，或行尾带 sender/receiver 的汇总行。
                                     String tail = raw.trim();
@@ -206,6 +227,18 @@ class Session {
         return model + " · " + modeName();
     }
 
+    /** 服务端当前这一轮收到的逐秒记录副本，停服时出结果卡用。 */
+    List<Record> serveRecords() {
+        synchronized (serveRecords) {
+            return new ArrayList<Record>(serveRecords);
+        }
+    }
+
+    /** 本次客户端运行写进历史的 id；没存成功为空串。 */
+    String lastHistoryId() {
+        return lastHistoryId;
+    }
+
     /** 停服务端 / 停客户端，一把杀掉 iperf3。 */
     void stopServing() {
         cancelled = true;
@@ -222,12 +255,17 @@ class Session {
         }
     }
 
-    /** 服务端历史：摘要 = 端口 + 最后一条 SUM。存不下只提示，绝不往外抛。 */
+    /** 服务端历史：摘要首行给速率，方便历史列表直接看；下面补端口和最后一条 SUM。 */
     private void saveServeHistory() {
-        String summary = "端口 " + port + "\n"
-                + (serveLastSum == null || serveLastSum.isEmpty() ? "服务端未收到测试流量" : serveLastSum);
+        Stats st = Stats.ofRecords(serveRecords());
+        String first = st != null && st.hasData()
+                ? "速率 " + Stats.fmtMb(st.mainMb()) + " Mb/s"
+                : "服务端未收到测试流量";
+        String summary = first + "\n端口 " + port + "\n"
+                + (serveLastSum == null || serveLastSum.isEmpty() ? "" : serveLastSum);
         try {
-            History.save(ctx, mode, "server", serveStartedAt, Bundle.stamp(), summary, runLogText(), "");
+            lastHistoryId = History.save(ctx, mode, "server", serveStartedAt, Bundle.stamp(),
+                    summary, runLogText(), "", label);
         } catch (Exception e) {
             line("!!", "历史记录保存失败：" + msg(e));
         }
@@ -245,6 +283,7 @@ class Session {
             @Override
             public void run() {
                 Bundle bundle = null;
+                Stats stats = null;
                 String note = "";
                 try {
                     Bin.iperf3(ctx);
@@ -265,7 +304,8 @@ class Session {
                     bundle.reverse = reverse;
                     bundle.port = port;
                     bundle.udpBw = "UDP".equals(kind) ? udpBw : "";
-                    bundle.addDevice(Dev.collect(ctx));
+                    org.json.JSONObject dev = Dev.collect(ctx);
+                    bundle.addDevice(dev);
 
                     KeepAlive.start(ctx, "正在打流 · " + modeName());
                     String testId = reverse ? "tcp_down" : "tcp_up";
@@ -284,6 +324,16 @@ class Session {
                                 }
                             });
                     bundle.addResult(testId, name, r);
+                    stats = Stats.of(r);
+                    if (stats != null) {
+                        stats.duration = duration;
+                        stats.streams = streams;
+                        stats.interval = interval;
+                        org.json.JSONObject w = dev.optJSONObject("wifi");
+                        if (w != null) {
+                            stats.linkMbps = w.optDouble("link_tx_mbps", -1);
+                        }
+                    }
                     if (r.ok) {
                         line("OK", "完成，用时 " + Math.round((r.endedAt - System.currentTimeMillis()) / 1000.0 + duration)
                                 + " 秒，" + r.records.size() + " 行数据");
@@ -306,10 +356,20 @@ class Session {
                     // bundle 为 null 说明这轮根本没起测试（比如没填对端地址），没有可存的东西
                     if (bundle != null) {
                         try {
-                            String summary = "时长 " + duration + " 秒 · " + streams + " 流 · 采样 "
-                                    + interval + " 秒 · " + kind + (reverse ? " 反向" : " 正向");
-                            History.save(ctx, mode, "client", bundle.startedAt, bundle.finishedAt,
-                                    summary, runLogText(), bundle.toJsonString());
+                            // 摘要第一行给历史列表看：有结果就把速率放前面，没有就退回参数
+                            String summary;
+                            if (stats != null && stats.hasData()) {
+                                summary = (stats.receiverMb >= 0 ? "接收端 " : "平均 ")
+                                        + Stats.fmtMb(stats.mainMb()) + " Mb/s · "
+                                        + duration + " 秒 · " + streams + " 流 · " + kind
+                                        + (reverse ? " 反向" : " 正向");
+                            } else {
+                                summary = "时长 " + duration + " 秒 · " + streams + " 流 · 采样 "
+                                        + interval + " 秒 · " + kind + (reverse ? " 反向" : " 正向");
+                            }
+                            lastHistoryId = History.save(ctx, mode, "client", bundle.startedAt,
+                                    bundle.finishedAt, summary, runLogText(),
+                                    bundle.toJsonString(), label);
                         } catch (Exception e) {
                             line("!!", "历史记录保存失败：" + msg(e));
                         }
@@ -319,7 +379,7 @@ class Session {
                     note = "测试异常：" + msg(e);
                 } finally {
                     KeepAlive.stop(ctx);
-                    listener.onDone(bundle, note);
+                    listener.onDone(bundle, stats, note);
                 }
             }
         }, "session-run");

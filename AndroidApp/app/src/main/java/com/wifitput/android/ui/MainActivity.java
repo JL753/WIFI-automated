@@ -56,8 +56,10 @@ public class MainActivity extends Activity implements TabPanel.StatusSink {
     @Override
     protected void onCreate(Bundle b) {
         super.onCreate(b);
+        Ui.init(this);
+        Ui.applyBars(this);
         LinearLayout root = Ui.column(this);
-        root.setBackgroundColor(Color.WHITE);
+        root.setBackgroundColor(Ui.PAGE_BG);
 
         root.addView(buildHeader());
 
@@ -114,7 +116,7 @@ public class MainActivity extends Activity implements TabPanel.StatusSink {
         rlp.topMargin = Ui.dp(this, 5);
         head.addView(runStatus, rlp);
 
-        status = Ui.text(this, "", 11.5f, 0xFFD6E6FA, false);
+        status = Ui.text(this, "", 11.5f, Ui.HEADER_SUB, false);
         status.setPadding(0, Ui.dp(this, 3), 0, Ui.dp(this, 8));
         head.addView(status);
 
@@ -166,8 +168,8 @@ public class MainActivity extends Activity implements TabPanel.StatusSink {
         for (int i = 0; i < tabViews.size(); i++) {
             TextView t = tabViews.get(i);
             boolean on = i == active;
-            t.setTextColor(on ? Ui.BLUE : 0xFFDCE9F8);
-            t.setBackground(on ? Ui.round(this, Color.WHITE, 0, 10f) : null);
+            t.setTextColor(on ? Ui.TAB_ON_INK : Ui.TAB_INACTIVE);
+            t.setBackground(on ? Ui.round(this, Ui.TAB_ON_BG, 0, 10f) : null);
             t.setAlpha(on ? 1f : 0.85f);
         }
     }

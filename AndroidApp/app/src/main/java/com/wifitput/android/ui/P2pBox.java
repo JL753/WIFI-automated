@@ -24,6 +24,13 @@ import java.util.List;
  */
 class P2pBox extends LinearLayout implements WifiDirect.Cb {
 
+    interface Listener {
+        void onGroup(boolean grouped, boolean isGo, String ip, String ssid, String pass);
+
+        /** 组网过程中的一行状态，用于控制台在抽屉关着时也能看到进度。 */
+        void onStatus(String s);
+    }
+
     private static final String IDLE =
             "未组网。点「组建群组」让这台当群主，另一台点「搜索设备」找到它并加入。";
     private static final String NO_P2P = "这台设备不支持 Wi-Fi Direct";
@@ -34,6 +41,7 @@ class P2pBox extends LinearLayout implements WifiDirect.Cb {
 
     private String goIp = "";
     private boolean grouped;
+    private Listener listener;
 
     /** 等组网成功后要执行的动作（出码 / 按码连接），没有等的时候为 null。 */
     private Runnable pending;
@@ -117,9 +125,16 @@ class P2pBox extends LinearLayout implements WifiDirect.Cb {
         }
     }
 
+    void setListener(Listener l) {
+        listener = l;
+    }
+
     private void setStatus(String s, int color) {
         status.setText(s);
         status.setTextColor(color);
+        if (listener != null && s != null && !s.trim().isEmpty()) {
+            listener.onStatus(s);
+        }
     }
 
     private static LinearLayout.LayoutParams weight() {
@@ -212,6 +227,9 @@ class P2pBox extends LinearLayout implements WifiDirect.Cb {
                 if (!grp) {
                     goIp = "";
                     setStatus("未组网", Ui.GREY);
+                    if (listener != null) {
+                        listener.onGroup(false, false, "", "", "");
+                    }
                     return;
                 }
                 goIp = nz(ip);
@@ -225,6 +243,9 @@ class P2pBox extends LinearLayout implements WifiDirect.Cb {
                     sb.append("，密码 ").append(pass);
                 }
                 setStatus(sb.toString(), Ui.GREEN);
+                if (listener != null) {
+                    listener.onGroup(true, isGo, goIp, nz(ssid), nz(pass));
+                }
                 // 组网一成功就得把等着的动作放出去，否则点完按钮毫无反应
                 if (pending != null) {
                     Runnable next = pending;

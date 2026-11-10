@@ -28,16 +28,6 @@ import java.util.Map;
  */
 class RateChart extends View {
 
-    private static final int SERIES = 0xFF1565C0;
-    /** 曲线下方的面积只是淡淡一层，盖住网格就太吵了。 */
-    private static final int SERIES_WASH = 0x1A1565C0;
-    private static final int GRID = 0xFFEDF0F4;
-    private static final int AXIS = 0xFFD9DEE5;
-    private static final int INK = 0xFF212121;
-    private static final int MUTED = 0xFF6B7480;
-    private static final int UP = 0xFFC62828;
-    private static final int DOWN = 0xFF2E7D32;
-
     /** 1 秒采样跑满一小时也就 3600 个点，再长就丢掉最早的，内存和绘制都稳。 */
     private static final int MAX_POINTS = 3600;
 
@@ -143,6 +133,11 @@ class RateChart extends View {
         invalidate();
     }
 
+    /** 曲线上最新的一个点（Mb/s），还没数据时返回 -1。控制台的大数字用它。 */
+    float lastValue() {
+        return ys.isEmpty() ? -1f : ys.get(ys.size() - 1);
+    }
+
     /** 测试结束时把最后一个还没满一秒的采样落下来。 */
     void finish() {
         flush();
@@ -224,19 +219,19 @@ class RateChart extends View {
         text.setTypeface(Typeface.DEFAULT);
         text.setTextAlign(Paint.Align.LEFT);
         text.setTextSize(sp(10.5f));
-        text.setColor(MUTED);
+        text.setColor(Ui.MUTED);
         c.drawText("实时速率", left, pad + sp(10.5f), text);
 
         text.setTypeface(Typeface.DEFAULT_BOLD);
         text.setTextSize(sp(21f));
-        text.setColor(has ? INK : MUTED);
+        text.setColor(has ? Ui.INK : Ui.MUTED);
         String value = has ? fmt(latest) : "--";
         float valueBase = pad + Ui.dp(getContext(), 38);
         c.drawText(value, left, valueBase, text);
         float valueW = text.measureText(value);
         text.setTypeface(Typeface.DEFAULT);
         text.setTextSize(sp(10.5f));
-        text.setColor(MUTED);
+        text.setColor(Ui.MUTED);
         c.drawText("Mb/s", left + valueW + Ui.dp(getContext(), 6), valueBase - Ui.dp(getContext(), 1), text);
 
         if (!has) {
@@ -252,13 +247,13 @@ class RateChart extends View {
         String sign = up ? "+" : down ? "-" : "";
         text.setTypeface(Typeface.DEFAULT_BOLD);
         text.setTextSize(sp(12f));
-        text.setColor(up ? UP : down ? DOWN : MUTED);
+        text.setColor(up ? Ui.RED : down ? Ui.GREEN : Ui.MUTED);
         c.drawText(arrow + " " + sign + fmtDelta(Math.abs(delta)),
                 right, pad + sp(12f), text);
 
         text.setTypeface(Typeface.DEFAULT);
         text.setTextSize(sp(10.5f));
-        text.setColor(MUTED);
+        text.setColor(Ui.MUTED);
         c.drawText("峰值 " + fmt(peak) + " Mb/s", right, pad + Ui.dp(getContext(), 31), text);
         text.setTextAlign(Paint.Align.LEFT);
     }
@@ -271,9 +266,9 @@ class RateChart extends View {
         text.setTextSize(sp(9.5f));
         for (int i = 0; i <= 2; i++) {
             float y = b - (b - t) * i / 2f;
-            paint.setColor(i == 0 ? AXIS : GRID);
+            paint.setColor(i == 0 ? Ui.AXIS : Ui.GRID);
             c.drawLine(l, y, r, y, paint);
-            text.setColor(MUTED);
+            text.setColor(Ui.MUTED);
             text.setTextAlign(Paint.Align.RIGHT);
             c.drawText(fmtTick(maxV * i / 2f), l - Ui.dp(getContext(), 5), y + sp(3.2f), text);
         }
@@ -306,26 +301,26 @@ class RateChart extends View {
         area.close();
 
         paint.setStyle(Paint.Style.FILL);
-        paint.setColor(SERIES_WASH);
+        paint.setColor(Ui.alpha(Ui.BLUE, 0x1A));
         c.drawPath(area, paint);
 
         paint.setStyle(Paint.Style.STROKE);
         paint.setStrokeWidth(Math.max(2f, Ui.dp(getContext(), 2)));
-        paint.setColor(SERIES);
+        paint.setColor(Ui.BLUE);
         c.drawPath(line, paint);
 
         // 末端点：白圈垫底，压在曲线上也看得清「现在在哪」
         paint.setStyle(Paint.Style.FILL);
-        paint.setColor(0xFFFFFFFF);
+        paint.setColor(Ui.CARD);
         c.drawCircle(lastX, lastY, Ui.dp(getContext(), 6), paint);
-        paint.setColor(SERIES);
+        paint.setColor(Ui.BLUE);
         c.drawCircle(lastX, lastY, Ui.dp(getContext(), 4), paint);
     }
 
     private void drawAxisLabels(Canvas c, float l, float r, float b) {
         text.setTypeface(Typeface.DEFAULT);
         text.setTextSize(sp(9.5f));
-        text.setColor(MUTED);
+        text.setColor(Ui.MUTED);
         text.setTextAlign(Paint.Align.LEFT);
         c.drawText("0s", l, b + Ui.dp(getContext(), 12), text);
         text.setTextAlign(Paint.Align.RIGHT);
@@ -336,7 +331,7 @@ class RateChart extends View {
     private void drawEmpty(Canvas c, float l, float r, float t, float b) {
         text.setTypeface(Typeface.DEFAULT);
         text.setTextSize(sp(10.5f));
-        text.setColor(MUTED);
+        text.setColor(Ui.MUTED);
         text.setTextAlign(Paint.Align.CENTER);
         c.drawText(armed ? "正在等待第一秒数据…" : "开始打流后，这里按秒画实时速率",
                 (l + r) / 2f, (t + b) / 2f + sp(4f), text);

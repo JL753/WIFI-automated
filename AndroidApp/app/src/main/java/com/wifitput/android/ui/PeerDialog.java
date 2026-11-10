@@ -20,9 +20,6 @@ import java.util.List;
 /** 把扫描到的对端列出来，点一条就把地址回写到输入框。 */
 public final class PeerDialog {
 
-    private static final int CARD_LINE = 0xFFE4E8EE;
-    private static final int CARD_DOWN = 0xFFEDF3FB;
-
     private PeerDialog() {
     }
 
@@ -118,8 +115,8 @@ public final class PeerDialog {
     /** 按下变色靠状态列表，比再套一层触摸监听省事，也不会漏掉手指滑出去的复位。 */
     private static StateListDrawable cardBackground(Context c) {
         StateListDrawable bg = new StateListDrawable();
-        bg.addState(new int[]{android.R.attr.state_pressed}, cardDrawable(c, CARD_DOWN));
-        bg.addState(new int[0], cardDrawable(c, 0xFFFFFFFF));
+        bg.addState(new int[]{android.R.attr.state_pressed}, cardDrawable(c, Ui.PILL_BLUE_BG));
+        bg.addState(new int[0], cardDrawable(c, Ui.CARD));
         return bg;
     }
 
@@ -127,7 +124,7 @@ public final class PeerDialog {
         GradientDrawable d = new GradientDrawable();
         d.setColor(color);
         d.setCornerRadius(Ui.dp(c, 10));
-        d.setStroke(1, CARD_LINE);
+        d.setStroke(1, Ui.CARD_LINE);
         return d;
     }
 }

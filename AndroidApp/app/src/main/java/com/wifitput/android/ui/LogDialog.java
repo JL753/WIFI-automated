@@ -38,7 +38,7 @@ public final class LogDialog {
         view.setTypeface(Typeface.MONOSPACE);
         view.setTextIsSelectable(true);
         view.setPadding(Ui.dp(c, 12), Ui.dp(c, 12), Ui.dp(c, 12), Ui.dp(c, 12));
-        view.setBackgroundColor(0xFFF5F5F5);
+        view.setBackgroundColor(Ui.LOG_BG);
         scroll.addView(view, new ViewGroup.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 

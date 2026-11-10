@@ -26,6 +26,7 @@ import org.json.JSONArray;
 import org.json.JSONObject;
 
 import java.io.File;
+import java.util.ArrayList;
 import java.util.List;
 
 /** 历史记录：列表 + 单条详情。数据全部来自 core.History 落盘的目录，这里只负责展示和删除。 */
@@ -35,18 +36,23 @@ public class HistoryActivity extends Activity {
     private static final String NO_LOG = "（这次运行没有日志）";
     private static final String CARD_SAVE = "数据保存在手机上哪里";
     private static final String SYNC_FAIL = "同步失败，外部存储可能不可用";
-    private static final int AMBER = 0xFFB26A00;
 
     private TextView barTitle;
+    private TextView barRight;
     private FrameLayout content;
     /** 为 true 时返回键回到列表，而不是退出页面。 */
     private boolean detailShowing;
+    /** 对比模式：在列表里选两条记录。 */
+    private boolean compareMode;
+    private final List<String> picked = new ArrayList<String>();
 
     @Override
     protected void onCreate(Bundle b) {
         super.onCreate(b);
+        Ui.init(this);
+        Ui.applyBars(this);
         LinearLayout root = Ui.column(this);
-        root.setBackgroundColor(Color.WHITE);
+        root.setBackgroundColor(Ui.PAGE_BG);
         root.addView(buildBar());
 
         content = new FrameLayout(this);
@@ -59,11 +65,25 @@ public class HistoryActivity extends Activity {
 
     @Override
     public void onBackPressed() {
+        if (compareMode) {
+            exitCompare();
+            return;
+        }
         if (detailShowing) {
             showList();
             return;
         }
         super.onBackPressed();
+    }
+
+    private void goBack() {
+        if (compareMode) {
+            exitCompare();
+        } else if (detailShowing) {
+            showList();
+        } else {
+            finish();
+        }
     }
 
     private LinearLayout buildBar() {
@@ -76,7 +96,7 @@ public class HistoryActivity extends Activity {
         back.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                finish();
+                goBack();
             }
         });
         bar.addView(back, new LinearLayout.LayoutParams(
@@ -89,11 +109,20 @@ public class HistoryActivity extends Activity {
         bar.addView(barTitle, new LinearLayout.LayoutParams(0,
                 ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
 
-        // 右侧放一个和「返回」一模一样的隐形占位，两边等宽标题才会真的居中
-        TextView spacer = Ui.text(this, "‹ 返回", 15f, Color.WHITE, false);
-        spacer.setPadding(0, 0, Ui.dp(this, 8), 0);
-        spacer.setVisibility(View.INVISIBLE);
-        bar.addView(spacer, new LinearLayout.LayoutParams(
+        // 右侧「对比」/「取消」；和左侧返回一起把标题夹在中间
+        barRight = Ui.text(this, "对比", 14f, Color.WHITE, true);
+        barRight.setPadding(Ui.dp(this, 8), Ui.dp(this, 2), 0, Ui.dp(this, 2));
+        barRight.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                if (compareMode) {
+                    exitCompare();
+                } else {
+                    enterCompare();
+                }
+            }
+        });
+        bar.addView(barRight, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         return bar;
     }
@@ -101,8 +130,29 @@ public class HistoryActivity extends Activity {
     // ---------------------------------------------------------------- 列表
 
     private void showList() {
+        compareMode = false;
+        picked.clear();
+        rebuildList();
+    }
+
+    private void enterCompare() {
+        compareMode = true;
+        picked.clear();
+        rebuildList();
+    }
+
+    private void exitCompare() {
+        compareMode = false;
+        picked.clear();
+        rebuildList();
+    }
+
+    private void rebuildList() {
         detailShowing = false;
-        barTitle.setText(TITLE_LIST);
+        barTitle.setText(compareMode
+                ? "选两条对比（" + picked.size() + "/2）" : TITLE_LIST);
+        barRight.setText(compareMode ? "取消" : "对比");
+        barRight.setVisibility(View.VISIBLE);
         content.removeAllViews();
 
         List<History.Item> items;
@@ -111,6 +161,10 @@ public class HistoryActivity extends Activity {
         } catch (Exception e) {
             content.addView(centeredText("读取历史记录失败：" + e.getMessage()));
             return;
+        }
+        // 少于两条没有可对比的对象；对比模式下始终保留「取消」
+        if (!compareMode) {
+            barRight.setVisibility(items != null && items.size() >= 2 ? View.VISIBLE : View.GONE);
         }
 
         // 打流记录和「数据保存在哪里」这张卡放进同一条滚动路径：
@@ -159,7 +213,7 @@ public class HistoryActivity extends Activity {
 
         // 私有目录：复用 History.dir，保证和真正落盘的位置是同一个
         final String localPath = dirPath();
-        card.addView(pathBlock("手机上的位置", Color.BLACK, localPath, localPath.isEmpty(),
+        card.addView(pathBlock("手机上的位置", Ui.INK, localPath, localPath.isEmpty(),
                 "无法读取私有目录"), Ui.fill());
 
         // USB 可见目录：externalPath 返回空串就是外部存储不可用
@@ -207,7 +261,7 @@ public class HistoryActivity extends Activity {
         value.setTypeface(Typeface.MONOSPACE);
         value.setTextIsSelectable(!bad);
         value.setPadding(Ui.dp(this, 8), Ui.dp(this, 6), Ui.dp(this, 8), Ui.dp(this, 6));
-        value.setBackgroundColor(0xFFF5F5F5);
+        value.setBackgroundColor(Ui.LOG_BG);
         box.addView(value, Ui.fill());
         return box;
     }
@@ -260,8 +314,11 @@ public class HistoryActivity extends Activity {
     }
 
     private View listCard(final History.Item it) {
+        final boolean on = compareMode && picked.contains(it.id);
         LinearLayout card = Ui.column(this);
-        card.setBackground(Ui.round(this, Color.WHITE, Ui.CARD_LINE, 14f));
+        card.setBackground(on
+                ? Ui.round(this, Ui.PILL_BLUE_BG, Ui.BLUE, 14f)
+                : Ui.round(this, Ui.CARD, Ui.CARD_LINE, 14f));
         card.setPadding(Ui.dp(this, 13), Ui.dp(this, 11), Ui.dp(this, 13), Ui.dp(this, 11));
         card.setElevation(Ui.dp(this, 1f));
         LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(
@@ -271,7 +328,11 @@ public class HistoryActivity extends Activity {
         card.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                showDetail(it);
+                if (compareMode) {
+                    togglePick(it);
+                } else {
+                    showDetail(it);
+                }
             }
         });
 
@@ -283,16 +344,23 @@ public class HistoryActivity extends Activity {
         top.addView(title, new LinearLayout.LayoutParams(0,
                 ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
 
-        TextView del = Ui.text(this, "删除", 11.5f, Ui.RED, false);
-        del.setPadding(Ui.dp(this, 10), 0, 0, 0);
-        del.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                confirmDelete(it);
-            }
-        });
-        top.addView(del, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        if (compareMode) {
+            TextView sel = Ui.text(this, on ? "✓ 已选" : "选择", 11.5f, on ? Ui.BLUE : Ui.GREY, true);
+            sel.setPadding(Ui.dp(this, 10), 0, 0, 0);
+            top.addView(sel, new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        } else {
+            TextView del = Ui.text(this, "删除", 11.5f, Ui.RED, false);
+            del.setPadding(Ui.dp(this, 10), 0, 0, 0);
+            del.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    confirmDelete(it);
+                }
+            });
+            top.addView(del, new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        }
         card.addView(top, Ui.fill());
 
         // 第二行：有时间就带上时间/模式，再跟概要首行（新记录里是速率）
@@ -334,10 +402,159 @@ public class HistoryActivity extends Activity {
                 .show();
     }
 
+    // ---------------------------------------------------------------- 对比
+
+    private void togglePick(final History.Item it) {
+        if (!"client".equals(it.role) || it.bundle == null || it.bundle.trim().isEmpty()) {
+            Toast.makeText(this, "这条记录没有结果包，不能参与对比", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        if (picked.contains(it.id)) {
+            picked.remove(it.id);
+        } else {
+            if (picked.size() >= 2) {
+                Toast.makeText(this, "最多选两条", Toast.LENGTH_SHORT).show();
+                return;
+            }
+            picked.add(it.id);
+        }
+        rebuildList();
+        if (picked.size() == 2) {
+            final History.Item a = History.load(this, picked.get(0));
+            final History.Item b = History.load(this, picked.get(1));
+            if (a != null && b != null) {
+                content.post(new Runnable() {
+                    @Override
+                    public void run() {
+                        showCompare(a, b);
+                    }
+                });
+            }
+        }
+    }
+
+    private void showCompare(final History.Item a, final History.Item b) {
+        final Stats sa = Stats.ofBundle(a.bundle);
+        final Stats sb = Stats.ofBundle(b.bundle);
+        if (sa == null || sb == null) {
+            new AlertDialog.Builder(this)
+                    .setTitle("无法对比")
+                    .setMessage("其中一条记录没有可解析的结果包。")
+                    .setPositiveButton("关闭", null)
+                    .show();
+            exitCompare();
+            return;
+        }
+        boolean same = sa.sameParams(sb) && safe(a.mode).equals(safe(b.mode));
+        LinearLayout box = Ui.column(this);
+        box.setPadding(Ui.dp(this, 16), Ui.dp(this, 8), Ui.dp(this, 16), Ui.dp(this, 4));
+        if (!same) {
+            TextView warn = Ui.text(this,
+                    "参数或模式不同：下面只做数值对照，不能当作严格的前后对比。",
+                    11.5f, Ui.AMBER, true);
+            warn.setPadding(0, 0, 0, Ui.dp(this, 6));
+            box.addView(warn, Ui.fill());
+        }
+        LinearLayout head = Ui.row(this);
+        head.addView(cmpCell("项目", 0.75f, Ui.GREY, true));
+        head.addView(cmpCell(shortLabel(a), 1f, Ui.INK, true));
+        head.addView(cmpCell(shortLabel(b), 1f, Ui.INK, true));
+        box.addView(head, Ui.fill());
+        cmpRow(box, "时间", shortTime(a.startedAt), shortTime(b.startedAt), false);
+        cmpRow(box, "模式", modeName(a.mode), modeName(b.mode), !safe(a.mode).equals(safe(b.mode)));
+        cmpRow(box, "参数", paramText(sa), paramText(sb), !sa.sameParams(sb));
+        cmpRow(box, "接收端", mbText(sa.receiverMb), mbText(sb.receiverMb), false);
+        cmpRow(box, "发送端", mbText(sa.senderMb), mbText(sb.senderMb), false);
+        cmpRow(box, "平均", mbText(sa.avgMb), mbText(sb.avgMb), false);
+        cmpRow(box, "最低", mbText(sa.minMb), mbText(sb.minMb), false);
+        cmpRow(box, "最高", mbText(sa.maxMb), mbText(sb.maxMb), false);
+        cmpRow(box, "重传", intText(sa.retr), intText(sb.retr), false);
+        cmpRow(box, "丢包", pctText(sa.lostPct), pctText(sb.lostPct), false);
+        cmpRow(box, "抖动", sa.jitter >= 0 ? Stats.fmtPct(sa.jitter) + "ms" : "--",
+                sb.jitter >= 0 ? Stats.fmtPct(sb.jitter) + "ms" : "--", false);
+
+        double x = sa.mainMb();
+        double y = sb.mainMb();
+        if (x > 0 && y > 0) {
+            double d = (y - x) * 100.0 / x;
+            TextView delta = Ui.text(this,
+                    "速率变化：" + Stats.fmtMb(x) + " → " + Stats.fmtMb(y) + " Mb/s（"
+                            + (d >= 0 ? "+" : "")
+                            + String.format(java.util.Locale.US, "%.1f", d) + "%）",
+                    12.5f, Ui.BLUE, true);
+            delta.setPadding(0, Ui.dp(this, 12), 0, 0);
+            box.addView(delta, Ui.fill());
+        }
+
+        ScrollView sv = new ScrollView(this);
+        sv.addView(box, new ScrollView.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        AlertDialog d = new AlertDialog.Builder(this)
+                .setTitle("两条记录对比")
+                .setView(sv)
+                .setPositiveButton("关闭", null)
+                .create();
+        d.setOnDismissListener(new DialogInterface.OnDismissListener() {
+            @Override
+            public void onDismiss(DialogInterface dialog) {
+                exitCompare();
+            }
+        });
+        d.show();
+    }
+
+    private void cmpRow(LinearLayout parent, String label, String a, String b, boolean warn) {
+        LinearLayout row = Ui.row(this);
+        row.setPadding(0, Ui.dp(this, 5), 0, Ui.dp(this, 5));
+        row.addView(cmpCell(label, 0.75f, Ui.GREY, false));
+        row.addView(cmpCell(a, 1f, warn ? Ui.RED : Ui.INK, false));
+        row.addView(cmpCell(b, 1f, warn ? Ui.RED : Ui.INK, false));
+        parent.addView(row, Ui.fill());
+    }
+
+    private TextView cmpCell(String s, float weight, int color, boolean bold) {
+        TextView t = Ui.text(this, s == null ? "--" : s, 11.5f, color, bold);
+        t.setLineSpacing(Ui.dp(this, 1), 1f);
+        t.setLayoutParams(new LinearLayout.LayoutParams(0,
+                ViewGroup.LayoutParams.WRAP_CONTENT, weight));
+        return t;
+    }
+
+    private String shortLabel(History.Item it) {
+        String label = safe(it.label).trim();
+        if (!label.isEmpty()) {
+            return label;
+        }
+        return shortTime(it.startedAt);
+    }
+
+    private static String shortTime(String stamp) {
+        String s = safe(stamp);
+        return s.length() >= 16 ? s.substring(5, 16) : (s.isEmpty() ? "--" : s);
+    }
+
+    private static String paramText(Stats s) {
+        return s.duration + "s · " + s.streams + " 流 · 采样 " + s.interval + "s · "
+                + s.kind + (s.reverse ? " 反向" : " 正向");
+    }
+
+    private static String mbText(double v) {
+        return v >= 0 ? Stats.fmtMb(v) + " Mb/s" : "--";
+    }
+
+    private static String pctText(double v) {
+        return v >= 0 ? Stats.fmtPct(v) + "%" : "--";
+    }
+
+    private static String intText(int v) {
+        return v >= 0 ? String.valueOf(v) : "--";
+    }
+
     // ---------------------------------------------------------------- 详情
 
     private void showDetail(final History.Item it) {
         detailShowing = true;
+        barRight.setVisibility(View.GONE);
         final String label = safe(it.label).trim();
         final String headTitle = label.isEmpty() ? safe(it.title) : label;
         barTitle.setText(detailTitle(headTitle));
@@ -420,7 +637,7 @@ public class HistoryActivity extends Activity {
         logView.setTypeface(Typeface.MONOSPACE);
         logView.setTextIsSelectable(true);
         logView.setPadding(Ui.dp(this, 8), Ui.dp(this, 6), Ui.dp(this, 8), Ui.dp(this, 6));
-        logView.setBackgroundColor(0xFFF5F5F5);
+        logView.setBackgroundColor(Ui.LOG_BG);
 
         ScrollView logScroll = new ScrollView(this);
         logScroll.addView(logView, new ScrollView.LayoutParams(
@@ -448,6 +665,12 @@ public class HistoryActivity extends Activity {
                 ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
         flp.leftMargin = Ui.dp(this, 8);
         btns.addView(full, flp);
+        logCard.addView(btns, Ui.fill());
+
+        LinearLayout btns2 = Ui.row(this);
+        LinearLayout.LayoutParams b2lp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        b2lp.topMargin = Ui.dp(this, 7);
         Button share = Ui.ghost(this, "分享摘要", new View.OnClickListener() {
             @Override
             public void onClick(View v) {
@@ -463,11 +686,20 @@ public class HistoryActivity extends Activity {
                         Share.text(safe(it.label), sub, st, compareText));
             }
         });
-        LinearLayout.LayoutParams slp = new LinearLayout.LayoutParams(0,
+        btns2.addView(share, new LinearLayout.LayoutParams(0,
+                ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        Button csv = Ui.ghost(this, "导出 CSV", new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                CsvExport.shareJson(HistoryActivity.this, safe(it.label),
+                        safe(it.startedAt), it.bundle);
+            }
+        });
+        LinearLayout.LayoutParams clp2 = new LinearLayout.LayoutParams(0,
                 ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
-        slp.leftMargin = Ui.dp(this, 8);
-        btns.addView(share, slp);
-        logCard.addView(btns, Ui.fill());
+        clp2.leftMargin = Ui.dp(this, 8);
+        btns2.addView(csv, clp2);
+        logCard.addView(btns2, b2lp);
 
         page.addView(logCard);
         content.addView(page, new FrameLayout.LayoutParams(
@@ -569,8 +801,8 @@ public class HistoryActivity extends Activity {
         card.addView(detail, Ui.fill());
 
         int level = st.level(st.linkMbps);
-        int bg = level == 2 ? 0xFFFBEAEA : level == 1 ? 0xFFFFF6E5 : 0xFFE7F4E9;
-        int fg = level == 2 ? Ui.RED : level == 1 ? AMBER : Ui.GREEN;
+        int bg = level == 2 ? Ui.DANGER_BG : level == 1 ? Ui.WARN_BG : Ui.SUCCESS_BG;
+        int fg = level == 2 ? Ui.RED : level == 1 ? Ui.AMBER : Ui.GREEN;
         TextView verdict = Ui.text(this, st.verdict(st.linkMbps), 12f, fg, false);
         verdict.setLineSpacing(Ui.dp(this, 1), 1f);
         verdict.setPadding(Ui.dp(this, 8), Ui.dp(this, 6), Ui.dp(this, 8), Ui.dp(this, 6));

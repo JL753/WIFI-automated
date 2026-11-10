@@ -31,6 +31,8 @@ public class QrShowActivity extends Activity {
     @Override
     protected void onCreate(Bundle b) {
         super.onCreate(b);
+        Ui.init(this);
+        Ui.applyBars(this);
 
         String text = "";
         String tip = "";
@@ -43,7 +45,7 @@ public class QrShowActivity extends Activity {
         }
 
         LinearLayout root = Ui.column(this);
-        root.setBackgroundColor(Color.WHITE);
+        root.setBackgroundColor(Ui.PAGE_BG);
         root.setPadding(Ui.dp(this, 18), Ui.dp(this, 14), Ui.dp(this, 18), Ui.dp(this, 14));
 
         root.addView(Ui.text(this, "投屏码", 19f, Ui.BLUE, true));

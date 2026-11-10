@@ -23,47 +23,65 @@ import org.json.JSONObject;
  */
 class HotspotBox extends LinearLayout {
 
+    interface Listener {
+        void onHotspot(boolean on, String ip);
+    }
+
     private static final String IDLE =
             "还没检测到本机热点。点「去系统设置开热点」，在系统设置里打开「便携式热点」，"
                     + "回来后点「重新检测」。";
 
     private final TextView status;
     private boolean checking;
+    private Listener listener;
+    private boolean on;
 
     HotspotBox(Context c) {
+        this(c, true);
+    }
+
+    /** withButtons=false 时只显示状态，开关/重新检测由外面的主按钮负责。 */
+    HotspotBox(Context c, boolean withButtons) {
         super(c);
         setOrientation(VERTICAL);
         addView(Ui.cardTitle(c, "系统热点"));
 
-        Button open = Ui.primary(c, "去系统设置开热点", new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                openSettings();
-            }
-        });
-        Button recheck = Ui.ghost(c, "重新检测", new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                refresh();
-            }
-        });
-        LinearLayout bar = Ui.row(c);
-        bar.addView(open, Ui.w(1.35f));
-        Ui.margin(c, open, 0, 0, 8, 0);
-        bar.addView(recheck, Ui.w(1f));
-        addView(bar, Ui.fill());
+        if (withButtons) {
+            Button open = Ui.primary(c, "去系统设置开热点", new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    openSettings();
+                }
+            });
+            Button recheck = Ui.ghost(c, "重新检测", new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    refresh();
+                }
+            });
+            LinearLayout bar = Ui.row(c);
+            bar.addView(open, Ui.w(1.35f));
+            Ui.margin(c, open, 0, 0, 8, 0);
+            bar.addView(recheck, Ui.w(1f));
+            addView(bar, Ui.fill());
+        }
 
-        status = Ui.text(c, IDLE, 13f, Ui.GREY, false);
-        status.setPadding(0, Ui.dp(c, 8), 0, 0);
+        status = Ui.text(c, IDLE, 12.5f, Ui.GREY, false);
+        status.setPadding(0, Ui.dp(c, 6), 0, 0);
         status.setLineSpacing(Ui.dp(c, 1), 1f);
         addView(status, Ui.fill());
+    }
 
-        addView(Ui.hint(c, "开热点这台：另一台手机在它的 WLAN 列表里连上这个热点，再回「WiFi」页扫描对端。\n"
-                + "连热点这台：同样去系统设置 → WLAN，选对方的热点名、输密码连上。"));
+    void setListener(Listener l) {
+        listener = l;
+    }
+
+    boolean isOn() {
+        return on;
     }
 
     /** 打不开主流设置页时退到无线设置，都不行就把说法打在状态行上。 */
-    private void openSettings() {
+    void openSettings() {
         Context c = getContext();
         try {
             // Settings 里没有这个常量的公开字段，只能写字符串（实测可跳转到个人热点页）。
@@ -123,8 +141,12 @@ class HotspotBox extends LinearLayout {
     }
 
     private void render(JSONObject h) {
-        if (!h.optBoolean("on", false)) {
+        on = h.optBoolean("on", false);
+        if (!on) {
             setStatus(IDLE, Ui.GREY);
+            if (listener != null) {
+                listener.onHotspot(false, "");
+            }
             return;
         }
         String ip = h.optString("ip", "");
@@ -137,6 +159,9 @@ class HotspotBox extends LinearLayout {
         }
         setStatus("已检测到本机热点：本机地址 " + addr
                 + "\n另一台连上后在「WiFi」页点「扫描对端」，也可以手工填这个地址。", Ui.GREEN);
+        if (listener != null) {
+            listener.onHotspot(true, ip);
+        }
     }
 
     private void setStatus(String s, int color) {

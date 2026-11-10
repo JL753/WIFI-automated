@@ -30,6 +30,7 @@ public class QrShowActivity extends Activity {
 
     @Override
     protected void onCreate(Bundle b) {
+        Ui.applyTheme(this);
         super.onCreate(b);
         Ui.init(this);
         Ui.applyBars(this);

@@ -34,6 +34,8 @@ public class MainActivity extends Activity implements TabPanel.StatusSink {
     private TextView status;
     private TextView runStatus;
     private int current;
+    /** 上一次的深浅色模式，用来判断系统主题是否真的变了。 */
+    private int lastUiMode = -1;
 
     /** 顶栏全局状态：哪个页签在跑、跑了多久。切页签也不丢。 */
     private final Handler ticker = new Handler(Looper.getMainLooper());
@@ -55,9 +57,13 @@ public class MainActivity extends Activity implements TabPanel.StatusSink {
 
     @Override
     protected void onCreate(Bundle b) {
+        // 外观偏好要在 super.onCreate 之前设进去，弹窗和窗口背景才会跟着变
+        Ui.applyTheme(this);
         super.onCreate(b);
         Ui.init(this);
         Ui.applyBars(this);
+        lastUiMode = getResources().getConfiguration().uiMode
+                & android.content.res.Configuration.UI_MODE_NIGHT_MASK;
         LinearLayout root = Ui.column(this);
         root.setBackgroundColor(Ui.PAGE_BG);
 
@@ -144,11 +150,12 @@ public class MainActivity extends Activity implements TabPanel.StatusSink {
         return head;
     }
 
-    /** 右上角「⋯」菜单。只有两项：翻历史记录、改结果回传的 PC 地址。 */
+    /** 右上角「⋯」菜单：历史、结果回传 PC、外观。 */
     private void showMenu(android.view.View anchor) {
         android.widget.PopupMenu m = new android.widget.PopupMenu(this, anchor);
         m.getMenu().add(0, 1, 0, "查看历史记录");
         m.getMenu().add(0, 2, 1, "设置结果回传 PC");
+        m.getMenu().add(0, 3, 2, "外观（跟随系统 / 浅色 / 深色）");
         m.setOnMenuItemClickListener(new android.widget.PopupMenu.OnMenuItemClickListener() {
             @Override
             public boolean onMenuItemClick(android.view.MenuItem item) {
@@ -156,11 +163,55 @@ public class MainActivity extends Activity implements TabPanel.StatusSink {
                     startActivity(new android.content.Intent(MainActivity.this, HistoryActivity.class));
                     return true;
                 }
+                if (item.getItemId() == 3) {
+                    showAppearance();
+                    return true;
+                }
                 PcDialog.show(MainActivity.this);
                 return true;
             }
         });
         m.show();
+    }
+
+    /** 外观三选一。换外观会重建页面，所以有测试在跑时先拦住，避免把这一轮 UI 断开。 */
+    private void showAppearance() {
+        final String[] labels = {"跟随系统", "浅色", "深色"};
+        final String[] values = {Ui.THEME_SYSTEM, Ui.THEME_LIGHT, Ui.THEME_DARK};
+        String cur = Prefs.getStr(this, "theme_mode", Ui.THEME_SYSTEM);
+        int checked = 0;
+        for (int i = 0; i < values.length; i++) {
+            if (values[i].equals(cur)) {
+                checked = i;
+            }
+        }
+        new AlertDialog.Builder(this)
+                .setTitle("外观")
+                .setSingleChoiceItems(labels, checked, new android.content.DialogInterface.OnClickListener() {
+                    @Override
+                    public void onClick(android.content.DialogInterface d, int which) {
+                        boolean busy = false;
+                        for (TabPanel p : panels) {
+                            if (p.isBusy()) {
+                                busy = true;
+                            }
+                        }
+                        if (busy) {
+                            android.widget.Toast.makeText(MainActivity.this,
+                                    "先停掉正在跑的测试再换外观", android.widget.Toast.LENGTH_SHORT).show();
+                            return;
+                        }
+                        Prefs.putStr(MainActivity.this, "theme_mode", values[which]);
+                        d.dismiss();
+                        // 把抽屉里还没开始的参数先存下来，重建后不丢
+                        for (TabPanel p : panels) {
+                            p.persistSettings();
+                        }
+                        recreate();
+                    }
+                })
+                .setNegativeButton("取消", null)
+                .show();
     }
 
     /** 选中的 Tab 白底蓝字 + 顶部圆角，未选中半透明，一眼能看出在哪一页。 */
@@ -337,6 +388,30 @@ public class MainActivity extends Activity implements TabPanel.StatusSink {
                 status.setText(sb.toString());
             }
         });
+    }
+
+    @Override
+    public void onConfigurationChanged(android.content.res.Configuration cfg) {
+        super.onConfigurationChanged(cfg);
+        int mode = cfg.uiMode & android.content.res.Configuration.UI_MODE_NIGHT_MASK;
+        if (mode == lastUiMode) {
+            return;
+        }
+        // 有测试在跑时先不重建，避免把这一轮 UI 和后台 iperf 断开
+        boolean busy = false;
+        for (TabPanel p : panels) {
+            if (p.isBusy()) {
+                busy = true;
+            }
+        }
+        if (busy) {
+            return;
+        }
+        lastUiMode = mode;
+        for (TabPanel p : panels) {
+            p.persistSettings();
+        }
+        recreate();
     }
 
     @Override

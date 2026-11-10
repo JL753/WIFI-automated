@@ -5,4 +5,21 @@
         <item name="android:colorAccent">#1565C0</item>
         <item name="android:windowBackground">#F4F6F9</item>
     </style>
+
+    <style name="AppThemeLight" parent="@android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:colorPrimary">#1565C0</item>
+        <item name="android:colorAccent">#1565C0</item>
+        <item name="android:windowBackground">#F4F6F9</item>
+    </style>
+
+    <style name="AppThemeDark" parent="@android:style/Theme.Material.NoActionBar">
+        <item name="android:colorPrimary">#1B5E9E</item>
+        <item name="android:colorAccent">#5AA2F0</item>
+        <item name="android:windowBackground">#101318</item>
+    </style>
+
+    <style name="SheetAnimation">
+        <item name="android:windowEnterAnimation">@anim/sheet_in</item>
+        <item name="android:windowExitAnimation">@anim/sheet_out</item>
+    </style>
 </resources>

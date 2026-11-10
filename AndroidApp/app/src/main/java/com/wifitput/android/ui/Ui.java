@@ -15,6 +15,9 @@ import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 
+import com.wifitput.android.R;
+import com.wifitput.android.core.Prefs;
+
 /** 纯代码搭界面用到的小工具：配色、圆角卡片、主次按钮、输入框。 */
 final class Ui {
 
@@ -61,10 +64,33 @@ final class Ui {
     private Ui() {
     }
 
-    /** 每个 Activity 建界面之前调用一次；跟随系统浅色/深色。 */
-    static void init(Context c) {
+    static final String THEME_SYSTEM = "system";
+    static final String THEME_LIGHT = "light";
+    static final String THEME_DARK = "dark";
+
+    /** 外观偏好：手动浅色/深色优先，否则跟随系统。 */
+    static boolean resolveDark(Context c) {
+        String m = Prefs.getStr(c, "theme_mode", THEME_SYSTEM);
+        if (THEME_LIGHT.equals(m)) {
+            return false;
+        }
+        if (THEME_DARK.equals(m)) {
+            return true;
+        }
         int mode = c.getResources().getConfiguration().uiMode & Configuration.UI_MODE_NIGHT_MASK;
-        dark = mode == Configuration.UI_MODE_NIGHT_YES;
+        return mode == Configuration.UI_MODE_NIGHT_YES;
+    }
+
+    /** 必须在本 Activity 的 super.onCreate 之前调用：把弹窗/窗口主题也切到手动模式。 */
+    static void applyTheme(android.app.Activity a) {
+        if (a != null) {
+            a.setTheme(resolveDark(a) ? R.style.AppThemeDark : R.style.AppThemeLight);
+        }
+    }
+
+    /** 每个 Activity 建界面之前调用一次；跟随手动偏好或系统。 */
+    static void init(Context c) {
+        dark = resolveDark(c);
         if (dark) {
             BLUE = 0xFF5AA2F0;
             BLUE_DARK = 0xFF1E7BD6;

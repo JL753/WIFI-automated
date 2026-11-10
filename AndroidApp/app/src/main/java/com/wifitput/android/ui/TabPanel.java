@@ -24,6 +24,7 @@ import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
 
+import com.wifitput.android.R;
 import com.wifitput.android.core.Bundle;
 import com.wifitput.android.core.Compare;
 import com.wifitput.android.core.Discovery;
@@ -89,6 +90,7 @@ class TabPanel extends ScrollView implements Session.Listener, AddrSink {
     private final Button kindBtn;
     private final Button dirBtn;
     private Dialog setupDialog;
+    private LinearLayout setupSheetView;
     private TextView roleChip;
     private TextView uploadBtn;
     private HotspotBox hs;
@@ -107,6 +109,10 @@ class TabPanel extends ScrollView implements Session.Listener, AddrSink {
 
     private Bundle last;
     private Stats lastStats;
+    /** 服务端结果没有 Bundle，导出 CSV 时用它这一轮收到的记录。 */
+    private List<Record> lastServerRecords = new ArrayList<Record>();
+    private String lastServerAt = "";
+    private boolean lastWasServer;
     private int repeatTotal = 1;
     private int repeatIndex = 1;
     private final List<Stats> repeatStats = new ArrayList<Stats>();
@@ -943,10 +949,13 @@ class TabPanel extends ScrollView implements Session.Listener, AddrSink {
     private void showServerResult() {
         List<Record> recs = session.serveRecords();
         Stats st = Stats.ofRecords(recs);
+        lastWasServer = true;
+        lastServerRecords = recs;
+        lastServerAt = Bundle.stamp();
         if (st != null && st.hasData()) {
             lastStats = st;
             String subtitle = "服务端 · 收到 " + recs.size() + " 行逐秒数据";
-            resultCard.show(st, session.label, subtitle, "", "", false, false);
+            resultCard.show(st, session.label, subtitle, "", "", false, !recs.isEmpty());
             lastShareText = Share.text(session.label, subtitle, st, "");
         } else {
             lastStats = null;
@@ -962,6 +971,8 @@ class TabPanel extends ScrollView implements Session.Listener, AddrSink {
             return;
         }
         lastStats = stats;
+        lastWasServer = false;
+        lastServerRecords = new ArrayList<Record>();
         String label = session.label == null ? "" : session.label.trim();
         String time = bundle != null && bundle.startedAt != null && bundle.startedAt.length() >= 19
                 ? bundle.startedAt.substring(11) : "";
@@ -1004,6 +1015,10 @@ class TabPanel extends ScrollView implements Session.Listener, AddrSink {
     }
 
     private void exportCsv() {
+        if (lastWasServer) {
+            CsvExport.shareRecords(c(), session.label, lastServerAt, lastServerRecords);
+            return;
+        }
         if (last == null) {
             log.add("!! 还没有可导出的结果");
             refreshLog();
@@ -1159,6 +1174,9 @@ class TabPanel extends ScrollView implements Session.Listener, AddrSink {
         if (setupDialog == null) {
             return;
         }
+        if (setupSheetView != null) {
+            setupSheetView.setTranslationY(0);
+        }
         updateSummary();
         if (roleChip != null) {
             roleChip.setText(roleChipText());
@@ -1172,12 +1190,56 @@ class TabPanel extends ScrollView implements Session.Listener, AddrSink {
 
     private void buildSetupSheet() {
         Context c = c();
-        LinearLayout sheet = Ui.column(c);
+        final LinearLayout sheet = Ui.column(c);
         sheet.setBackground(Ui.round(c, Ui.PAGE_BG, 0, 18f));
+        setupSheetView = sheet;
+
+        // 顶部拖拽条：按住往下拖超过 80dp 就关掉，面板有「底部抽屉」的手感
+        LinearLayout handleBox = Ui.column(c);
+        handleBox.setGravity(Gravity.CENTER_HORIZONTAL);
+        handleBox.setPadding(0, Ui.dp(c, 8), 0, Ui.dp(c, 6));
+        View handle = new View(c);
+        handle.setBackground(Ui.round(c, Ui.CHIP_LINE, 0, 2f));
+        handleBox.addView(handle, new LinearLayout.LayoutParams(
+                Ui.dp(c, 36), Ui.dp(c, 4)));
+        sheet.addView(handleBox, Ui.fill());
+
+        final float[] startY = new float[1];
+        View.OnTouchListener drag = new View.OnTouchListener() {
+            @Override
+            public boolean onTouch(View v, android.view.MotionEvent e) {
+                int action = e.getActionMasked();
+                if (action == android.view.MotionEvent.ACTION_DOWN) {
+                    startY[0] = e.getRawY();
+                    return true;
+                }
+                if (action == android.view.MotionEvent.ACTION_MOVE) {
+                    sheet.setTranslationY(Math.max(0f, e.getRawY() - startY[0]));
+                    return true;
+                }
+                if (action == android.view.MotionEvent.ACTION_UP
+                        || action == android.view.MotionEvent.ACTION_CANCEL) {
+                    float dy = sheet.getTranslationY();
+                    if (dy > Ui.dp(c, 80)) {
+                        sheet.setTranslationY(0);
+                        if (setupDialog != null) {
+                            setupDialog.dismiss();
+                        }
+                    } else {
+                        sheet.animate().translationY(0).setDuration(160).start();
+                    }
+                    return true;
+                }
+                return false;
+            }
+        };
+        handleBox.setOnTouchListener(drag);
 
         LinearLayout head = Ui.row(c);
         head.setPadding(Ui.dp(c, 16), Ui.dp(c, 14), Ui.dp(c, 16), Ui.dp(c, 8));
         TextView t = Ui.text(c, "设置与连接", 17f, Ui.INK, true);
+        // 标题区也能拖，比只拖那根 4dp 的小条好按
+        t.setOnTouchListener(drag);
         head.addView(t, new LinearLayout.LayoutParams(0,
                 ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
         TextView done = Ui.text(c, "完成", 14f, Ui.BLUE, true);
@@ -1316,6 +1378,7 @@ class TabPanel extends ScrollView implements Session.Listener, AddrSink {
             w.setLayout(ViewGroup.LayoutParams.MATCH_PARENT,
                     (int) (dm.heightPixels * 0.86f));
             w.setGravity(Gravity.BOTTOM);
+            w.setWindowAnimations(R.style.SheetAnimation);
             WindowManager.LayoutParams lp = w.getAttributes();
             lp.dimAmount = 0.45f;
             w.setAttributes(lp);
@@ -1334,6 +1397,15 @@ class TabPanel extends ScrollView implements Session.Listener, AddrSink {
         Prefs.putBool(c(), "test_server", testServer);
         Prefs.putBool(c(), "hotspot_host", hotspotHost);
         Prefs.putBool(c(), "p2p_owner", p2pOwner);
+    }
+
+    /** 换外观前把抽屉里还没开始的参数存下来，Activity 重建后不会丢。 */
+    void persistSettings() {
+        if (pullParams()) {
+            session.savePrefs();
+            saveRoles();
+            Prefs.putStr(c(), "run_label", labelInput.getText().toString().trim());
+        }
     }
 
     private boolean pullParams() {

@@ -36,9 +36,22 @@ final class CsvExport {
             toast(c, "这次没有逐秒数据，无法导出 CSV");
             return;
         }
+        share(c, label, startedAt, rows(bundle.records));
+    }
+
+    /** 服务端结果卡没有 Bundle，但有当轮收到的逐秒记录，直接用它们导出。 */
+    static void shareRecords(Context c, String label, String startedAt, List<Record> records) {
+        if (c == null || records == null || records.isEmpty()) {
+            toast(c, "这次没有逐秒数据，无法导出 CSV");
+            return;
+        }
+        share(c, label, startedAt, rows(records));
+    }
+
+    private static String rows(List<Record> records) {
         StringBuilder sb = new StringBuilder();
         sb.append('\uFEFF').append(HEADER).append("\r\n");
-        for (Record r : bundle.records) {
+        for (Record r : records) {
             sb.append(row(r.t, r.test, r.kind, r.stream,
                     fmt(r.start), fmt(r.end), fmt(r.transfer), r.unit,
                     fmt(r.rate), r.rateUnit,
@@ -46,7 +59,7 @@ final class CsvExport {
                     emptyDash(r.jitter), emptyDash(r.lost), emptyDash(r.total),
                     emptyDash(r.lostPct), r.role)).append("\r\n");
         }
-        share(c, label, startedAt, sb.toString());
+        return sb.toString();
     }
 
     /** 历史详情里只有结果包 JSON 字符串，直接从 JSON 里取逐秒行。 */

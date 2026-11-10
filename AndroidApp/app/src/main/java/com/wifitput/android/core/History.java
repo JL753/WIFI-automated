@@ -272,6 +272,33 @@ public class History {
                 // 删不掉不影响本次保存
             }
         }
+        // 条数上限之外再加体积上限：长稳单条可能几十 MB，50 条会撑爆手机存储。
+        File[] left = dir(ctx).listFiles();
+        if (left == null) {
+            return;
+        }
+        List<File> rest = new ArrayList<File>();
+        long total = 0;
+        for (File f : left) {
+            if (f.isFile() && f.getName().endsWith(EXT)) {
+                rest.add(f);
+                total += f.length();
+            }
+        }
+        java.util.Collections.sort(rest, new Comparator<File>() {
+            @Override
+            public int compare(File a, File b) {
+                return b.getName().compareTo(a.getName());
+            }
+        });
+        long cap = 256L * 1024 * 1024;
+        for (int i = rest.size() - 1; i >= 1 && total > cap; i--) {
+            File f = rest.get(i);
+            long len = f.length();
+            if (f.delete()) {
+                total -= len;
+            }
+        }
     }
 
     /** 整份解析；id 以文件名为准，不信文件里存的（文件可能被手工改过）。 */
@@ -313,6 +340,9 @@ public class History {
         }
         if ("p2p".equals(mode)) {
             return "P2P";
+        }
+        if ("pc".equals(mode)) {
+            return "连PC";
         }
         return "WiFi";
     }

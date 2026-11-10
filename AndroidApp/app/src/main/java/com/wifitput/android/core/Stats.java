@@ -112,6 +112,11 @@ public class Stats {
      * 结果包里的 records 是发起端视角的逐秒行，与客户端运行一致。
      */
     public static Stats ofBundle(String json) {
+        return ofBundle(json, 0);
+    }
+
+    /** 连PC 的结果包有下载/上传两条 result；index=0 下载，1 上传。 */
+    public static Stats ofBundle(String json, int index) {
         if (json == null || json.trim().isEmpty()) {
             return null;
         }
@@ -122,7 +127,7 @@ public class Stats {
             if (results == null || results.length() == 0) {
                 return null;
             }
-            JSONObject r0 = results.optJSONObject(0);
+            JSONObject r0 = results.optJSONObject(Math.max(0, Math.min(index, results.length() - 1)));
             if (r0 == null) {
                 return null;
             }

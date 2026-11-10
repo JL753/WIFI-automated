@@ -4,8 +4,8 @@
 
 | 目录 | 是什么 | 跑在哪 | 需要什么 |
 | --- | --- | --- | --- |
-| [`AndroidApp`](AndroidApp) | 手机 App（Android），双机互打流，WiFi / 热点 / P2P 三模式；控制台式界面、深色模式、历史对比、CSV 导出 | 两台 Android 手机 | 装 `AndroidApp/APK/WiFiTput.apk` |
-| [`PC端工具`](PC端工具) | PC 端接收器：收手机推来的结果，落盘 CSV/JSON/MD 并直接看报告 | Windows + Python 3.8+ | PySide6（需自行安装，见下） |
+| [`AndroidApp`](AndroidApp) | 手机 App（Android），双机互打流 WiFi / 热点 / P2P + 一台手机对着 PC 的「连PC」模式；控制台式界面、深色模式、历史对比、CSV 导出 | 两台 Android 手机 | 装 `AndroidApp/APK/WiFiTput.apk` |
+| [`PC端工具`](PC端工具) | PC 端接收器 + 「本机服务端」（给连PC 模式一键起 iperf3）；收手机推来的结果，落盘 CSV/JSON/MD 并直接看报告 | Windows + Python 3.8+ | PySide6（需自行安装，见下） |
 | [`WiFi吞吐量测试工具`](WiFi吞吐量测试工具) | 命令行版，7 个测试项合一，自带报告渲染 | Windows + Python 3.8+ | 纯标准库，零依赖 |
 | [`WiFiTput`](WiFiTput) | 上面那个命令行工具打包好的独立 exe | Windows | 什么都不用装，双击即用 |
 <img width="226" height="495" alt="image" src="https://github.com/user-attachments/assets/7223bb1f-cd9a-429f-b07d-32a1b380c647" />

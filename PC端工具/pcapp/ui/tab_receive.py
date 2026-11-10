@@ -32,6 +32,7 @@ class ReceiveTab(QtWidgets.QWidget):
         self.usb_done.connect(self._on_usb_done)
         self.usb_failed.connect(self._on_usb_failed)
         self.usb_devices.connect(self._on_usb_devices)
+        self.ctx.bus.receiver_changed.connect(self._update_status)
         self.refresh_table()
         self._update_status()
         if self.ctx.cfg.get("auto_start"):

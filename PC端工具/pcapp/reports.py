@@ -89,6 +89,11 @@ def write_bundle(bundle, out_base=None, tag=""):
         raise ReportError("写 %s 失败：%s" % (csv_name, exc))
     files.append((csv_name, _size(csv_name)))
 
+    single = {}
+    for key in ("ping", "telemetry", "telemetry_summary", "server"):
+        value = bundle.get(key)
+        if value is not None:
+            single[key] = value
     try:
         payload = mod.build_payload(
             meta=bundle.get("meta") or {},
@@ -97,6 +102,7 @@ def write_bundle(bundle, out_base=None, tag=""):
             results=bundle.get("results") or [],
             screen=(bundle.get("screen") if isinstance(bundle.get("screen"), dict) else None),
             notes=bundle.get("notes") or [],
+            single=single,
         )
     except Exception as exc:
         raise ReportError("组装报告数据失败：%s" % exc)

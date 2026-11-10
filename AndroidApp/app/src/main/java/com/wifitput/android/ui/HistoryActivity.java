@@ -579,6 +579,14 @@ public class HistoryActivity extends Activity {
         addRow(head, "模式", modeName(it.mode));
         body.addView(head);
 
+        // 连PC 有下载/上传两条结果，先单独给一张四项摘要
+        if ("pc".equals(it.mode)) {
+            View pcc = pcHistoryCard(it.bundle);
+            if (pcc != null) {
+                body.addView(pcc);
+            }
+        }
+
         // 结果卡只对客户端记录有意义（服务端历史没有结果包）
         final Stats st = Stats.ofBundle(it.bundle);
         final String compareText;
@@ -705,6 +713,66 @@ public class HistoryActivity extends Activity {
         page.addView(logCard);
         content.addView(page, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+    }
+
+    /** 连PC 历史的四项摘要 + PC 服务器/链路。 */
+    private View pcHistoryCard(String json) {
+        try {
+            JSONObject o = new JSONObject(json);
+            Stats d = Stats.ofBundle(json, 0);
+            Stats u = Stats.ofBundle(json, 1);
+            JSONObject ping = o.optJSONObject("ping");
+            JSONObject srv = o.optJSONObject("server");
+            JSONObject ts = o.optJSONObject("telemetry_summary");
+
+            LinearLayout card = Ui.card(this, "连PC 结果");
+            LinearLayout big = Ui.row(this);
+            TextView down = Ui.text(this, "下载 " + (d == null ? "--"
+                            : Stats.fmtMb(PcResultCard.downMb(d)) + " Mb/s"),
+                    18f, Ui.INK, true);
+            big.addView(down, new LinearLayout.LayoutParams(0,
+                    ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+            TextView up = Ui.text(this, "上传 " + (u == null ? "--"
+                            : Stats.fmtMb(PcResultCard.upMb(u)) + " Mb/s"),
+                    18f, Ui.INK, true);
+            big.addView(up, new LinearLayout.LayoutParams(0,
+                    ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+            card.addView(big, Ui.fill());
+
+            if (ping != null) {
+                String method = ping.optString("method", "udp");
+                card.addView(Ui.text(this,
+                        "ping 丢包 " + Stats.fmtPct(ping.optDouble("loss_pct", -1)) + "%"
+                                + " · 闲置 " + Stats.fmtMb(ping.optDouble("avg_ms", -1))
+                                + " ms（" + method + "）",
+                        12f, Ui.GREY, false), Ui.fill());
+            }
+            if (srv != null) {
+                card.addView(Ui.text(this,
+                        "PC 服务器 " + srv.optString("label", "")
+                                + "  " + srv.optString("ip", "") + ":"
+                                + srv.optInt("iperf_port", 0)
+                                + "  " + srv.optString("version", ""),
+                        11.5f, Ui.MUTED, false), Ui.fill());
+            }
+            if (ts != null) {
+                StringBuilder line = new StringBuilder();
+                int disc = ts.optInt("disconnects", 0);
+                line.append("断流 ").append(disc).append(" 次");
+                double cpu = ts.optDouble("cpu_avg", -1);
+                if (cpu >= 0) {
+                    line.append(" · CPU 均值 ").append(Stats.fmtPct(cpu)).append("%");
+                }
+                double rssi = ts.optDouble("rssi_avg", -1);
+                if (rssi > -200) {
+                    line.append(" · RSSI 均值 ").append(Math.round(rssi)).append(" dBm");
+                }
+                card.addView(Ui.text(this, line.toString(), 11.5f, Ui.MUTED, false), Ui.fill());
+            }
+            return card;
+        } catch (Exception e) {
+            return null;
+        }
     }
 
     /** 详情页的标签行：显示当前标签，右侧可直接加/改。 */
@@ -923,6 +991,9 @@ public class HistoryActivity extends Activity {
         }
         if ("p2p".equals(mode)) {
             return "P2P";
+        }
+        if ("pc".equals(mode)) {
+            return "连PC";
         }
         // 老记录或被手工改过的文件可能没有 mode，别在界面上留一行空白
         return mode == null || mode.trim().isEmpty() ? "未知" : mode;

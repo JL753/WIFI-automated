@@ -11,7 +11,7 @@ import time
 
 from PySide6 import QtCore
 
-from . import paths, protocol, receiver, reports, store
+from . import paths, pcserver, protocol, receiver, reports, store
 
 
 class Bus(QtCore.QObject):
@@ -21,6 +21,7 @@ class Bus(QtCore.QObject):
     received = QtCore.Signal(dict)        # 收到一包结果（已落盘）
     failed = QtCore.Signal(str, str)      # (标题, 原因)
     reset_layout = QtCore.Signal()        # 设置里点了「恢复默认」，主窗口把分隔条拉回默认比例
+    receiver_changed = QtCore.Signal()    # 接收服务被本页/服务端页启停，状态栏和收结果页要跟着刷新
 
 
 def default_run_id():
@@ -38,6 +39,7 @@ class Ctx:
         self.index = store.load_index()
         self.receiver = receiver.Receiver(on_result=self.on_result,
                                           on_log=self._rlog)
+        self.pcserver = pcserver.PcServer(on_log=self._rlog)
         self._lock = threading.Lock()
         self._report_probe = None
 

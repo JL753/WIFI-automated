@@ -47,6 +47,8 @@ TEST_NAMES = {
     "long_run": "长稳吞吐测试",
     "screen_on": "亮屏吞吐",
     "screen_off": "灭屏吞吐",
+    "pc_down": "连PC 下载（PC→手机）",
+    "pc_up": "连PC 上传（手机→PC）",
 }
 
 ITEM_NAMES = {
@@ -57,6 +59,7 @@ ITEM_NAMES = {
     "udp_qos": "UDP 抖动丢包测试",
     "link_snapshot": "链路质量快照",
     "pc_tunnel": "PC 参与的隧道测试",
+    "pc_tput": "连PC 吞吐测试",
 }
 
 _EMPTY = "--"
@@ -506,6 +509,39 @@ def _pick_serial(meta, test, devices, key):
     return ""
 
 
+def _verdict_pc(tests, single, meta, devices):
+    """连PC 的一句话结论：手机侧下载/上传 + ping + 稳定性。"""
+    down = next((t for t in tests if t.get("test_id") == "pc_down"), None)
+    up = next((t for t in tests if t.get("test_id") == "pc_up"), None)
+    if not down and not up:
+        return ""
+
+    def rate(t, key):
+        if not t:
+            return _EMPTY
+        obj = t.get(key) or {}
+        return fmt_bps(obj.get("rate"), obj.get("unit"))
+
+    bits = ["连PC：下载 %s（手机接收），上传 %s（手机发送）"
+            % (rate(down, "receiver"), rate(up, "sender"))]
+    ping = single.get("ping") or {}
+    lp = _f(ping.get("loss_pct"))
+    av = _f(ping.get("avg_ms"))
+    if lp is not None:
+        bits.append("ping 丢包 %.2f%%" % lp)
+    if av is not None:
+        bits.append("闲置 ping %.2f ms（%s）" % (av, ping.get("method") or "udp"))
+    for label, t in (("下载", down), ("上传", up)):
+        st = (t or {}).get("stats") or {}
+        mn = _f(st.get("min_rate"))
+        stall = _i(st.get("stall_n"))
+        if mn is not None:
+            bits.append("%s最低 %s" % (label, fmt_bps(mn, st.get("unit") or "Mbits/sec")))
+        if stall:
+            bits.append("%s有 %d 秒完全停滞" % (label, stall))
+    return "，".join(bits) + "。"
+
+
 def _verdict_tcp(test, meta, devices):
     up = test["test_id"] != "tcp_down"
     sender = test["sender"] or {}
@@ -750,9 +786,13 @@ def _pc_env_text(env):
     return " · ".join(parts) if parts else _EMPTY
 
 
-def build_payload(*, meta, devices, records, results, screen=None, notes=None):
-    """组装 JSON / Markdown 用的总结构（契约 4.4）。"""
+def build_payload(*, meta, devices, records, results, screen=None, notes=None, single=None):
+    """组装 JSON / Markdown 用的总结构（契约 4.4）。
+
+    single 是连PC 的扩展数据：ping / telemetry_summary / server；其它模式为空。
+    """
     meta_n = _norm_meta(meta)
+    single = single if isinstance(single, dict) else {}
     devices = [d for d in (devices or []) if isinstance(d, dict)]
     if not meta_n.get("iperf_version"):
         for dev in devices:
@@ -794,6 +834,8 @@ def build_payload(*, meta, devices, records, results, screen=None, notes=None):
         tid = t["test_id"]
         if tid in ("screen_on", "screen_off"):
             continue
+        if tid.startswith("pc_"):
+            continue
         if t["kind"] == "UDP":
             line = _verdict_udp(t)
         elif tid == "long_run":
@@ -802,6 +844,11 @@ def build_payload(*, meta, devices, records, results, screen=None, notes=None):
             line = _verdict_tcp(t, meta_n, devices)
         if line:
             verdicts.append(line)
+
+    if meta_n.get("mode") == "pc":
+        pc_line = _verdict_pc(tests, single, meta_n, devices)
+        if pc_line:
+            verdicts.append(pc_line)
 
     screen_cmp = _build_screen_compare(tests, screen)
     if screen_cmp["available"]:
@@ -813,6 +860,8 @@ def build_payload(*, meta, devices, records, results, screen=None, notes=None):
     tcp_pcts = []
     for t in tests:
         if t["kind"] != "TCP" or t["test_id"].startswith("screen_"):
+            continue
+        if t["test_id"].startswith("pc_"):
             continue
         up = t["test_id"] != "tcp_down"
         client = t["sender"] if up else t["receiver"]
@@ -840,8 +889,10 @@ def build_payload(*, meta, devices, records, results, screen=None, notes=None):
 
     if not tests:
         conclusion = "结论：本次没有产生任何测试结果。"
+    elif meta_n.get("mode") == "pc" and verdicts:
+        conclusion = "结论：" + verdicts[-1]
     elif failed:
-        conclusion = "结论：本次 %s，其中 %d 段未成功，详见「六、异常与提示」。" % (scope, len(failed))
+        conclusion = "结论：本次 %s，其中 %d 段未成功，详见「七、异常与提示」。" % (scope, len(failed))
     elif tcp_pcts:
         worst = min(tcp_pcts)
         best = max(tcp_pcts)
@@ -877,6 +928,7 @@ def build_payload(*, meta, devices, records, results, screen=None, notes=None):
         "screen_compare": screen_cmp,
         "notes": notes_out,
         "records": records,
+        "single": single,
     }
 
 
@@ -1107,6 +1159,7 @@ def render_markdown(payload):
     tests = [t for t in (payload.get("tests") or []) if isinstance(t, dict)]
     summary = payload.get("summary") or {}
     screen_cmp = payload.get("screen_compare") or {}
+    single = payload.get("single") or {}
     notes = _norm_notes(payload.get("notes"))
 
     out = []
@@ -1152,8 +1205,29 @@ def render_markdown(payload):
         ["并发流数", _cell(_num(meta.get("streams")) if meta.get("streams") else None)],
         ["采样间隔", _cell(("%s 秒" % _num(meta.get("interval")))
                           if meta.get("interval") else None)],
-        ["方向", _cell("反向（-R，服务端→客户端）" if meta.get("reverse") else "正向（客户端→服务端）")],
+        ["方向", _cell("双向（下载+上传，各跑满）" if meta.get("mode") == "pc"
+                        else ("反向（-R，服务端→客户端）" if meta.get("reverse")
+                              else "正向（客户端→服务端）"))],
     ]
+    tools = meta.get("tools") or {}
+    if tools:
+        rows.append(["工具", _cell("手机 %s / PC %s"
+                                   % (tools.get("client") or _EMPTY,
+                                      tools.get("server") or _EMPTY))])
+    if meta.get("bandwidth"):
+        bw = str(meta.get("bandwidth"))
+        rows.append(["带宽设置", _cell("TCP 不限速" if bw == "tcp_unlimited" else bw)])
+    if meta.get("duration_per_direction"):
+        rows.append(["每方向时长", _cell("%s 秒" % _num(meta.get("duration_per_direction")))])
+    loc = meta.get("location") or {}
+    if loc:
+        loc_txt = str(loc.get("preset") or "").strip()
+        dist = _f(loc.get("distance_m"))
+        if dist is not None and dist >= 0:
+            loc_txt += ("，" if loc_txt else "") + "%s m" % _num(dist)
+        rows.append(["位置/距离", _cell(loc_txt or None)])
+    if meta.get("long_run"):
+        rows.append(["长稳", _cell("是（SUM 行 + 5 秒遥测）")])
     if meta.get("udp_bw"):
         rows.append(["UDP 限速", _cell(meta.get("udp_bw"))])
     if meta.get("port"):
@@ -1175,6 +1249,18 @@ def render_markdown(payload):
         out.append(_md_table(heads, _device_rows(devices)))
     else:
         out.append("> 本次未采集到设备信息。")
+    srv = single.get("server") or {}
+    if srv:
+        out.append("")
+        out.append("### PC 服务器")
+        out.append("")
+        out.append(_md_table(["项目", "值"], [
+            ["标签", _cell(srv.get("label"))],
+            ["地址", _cell("%s:%s" % (_t(srv.get("ip"), "-"),
+                                      _t(srv.get("iperf_port"), "-")))],
+            ["结果接收端口", _cell(_num(srv.get("http_port")))],
+            ["iperf3 版本", _cell(srv.get("version"))],
+        ]))
     out.append("")
 
     # 四、测试结果
@@ -1187,8 +1273,73 @@ def render_markdown(payload):
         out.append("> 本次未产生测试结果。")
         out.append("")
 
-    # 五、亮灭屏对比
-    out.append("## 五、亮灭屏对比")
+    # 五、连PC 链路与稳定性
+    if single.get("ping") or single.get("telemetry_summary"):
+        out.append("## 五、连PC 链路与稳定性")
+        out.append("")
+        ping = single.get("ping") or {}
+        if ping:
+            out.append(_md_table(["空闲探测", "值"], [
+                ["探测方式", _cell(ping.get("method"))],
+                ["探测次数", _cell(_num(ping.get("probes")))],
+                ["丢包率", _cell(("%s%%" % _num(ping.get("loss_pct"), 2))
+                                 if _f(ping.get("loss_pct")) is not None else None)],
+                ["平均延迟", _cell(("%s ms" % _num(ping.get("avg_ms"), 2))
+                                   if _f(ping.get("avg_ms")) is not None else None)],
+                ["最小/最大", _cell("%s / %s ms" % (_num(ping.get("min_ms"), 2),
+                                                    _num(ping.get("max_ms"), 2)))],
+            ]))
+            out.append("")
+        ts = single.get("telemetry_summary") or {}
+        if ts:
+            out.append(_md_table(["链路/系统", "值"], [
+                ["RSSI 均值/最低", _cell("%s / %s dBm" % (_num(ts.get("rssi_avg"), 1),
+                                                          _num(ts.get("rssi_min"))))],
+                ["CPU 均值/最高", _cell("%s%% / %s%%" % (_num(ts.get("cpu_avg"), 1),
+                                                         _num(ts.get("cpu_max"), 1)))],
+                ["本 App CPU 均值", _cell(("%s%%" % _num(ts.get("app_cpu_avg"), 1))
+                                          if _f(ts.get("app_cpu_avg")) is not None else None)],
+                ["断流次数", _cell(_num(ts.get("disconnects")))],
+                ["采样点", _cell(_num(ts.get("samples")))],
+                ["MCS", _cell("不可用（Android 公共 API 不提供）")],
+                ["SNR", _cell("不可用（Android 公共 API 不提供）")],
+                ["频宽", _cell("不可用（需手动填写）")],
+            ]))
+            out.append("")
+        # 重传：iperf3 只给次数，不给段总数；这里给「次/MB」和按 MSS 1460B 的估算百分比
+        retr_rows = []
+        for label, tid in (("下载", "pc_down"), ("上传", "pc_up")):
+            t = next((x for x in tests if x.get("test_id") == tid), None)
+            if not t:
+                continue
+            st = t.get("stats") or {}
+            retr = _i(st.get("retr_sum"))
+            transfer = _f(st.get("transfer_sum"))
+            unit = str(st.get("transfer_unit") or "")
+            if retr is None:
+                continue
+            line = "重传 %d 次" % retr
+            if transfer and transfer > 0:
+                binary = unit.upper().startswith("MB")
+                mb = transfer * (1.048576 if binary else 1.0)
+                nbytes = transfer * ((1024 * 1024) if binary else 1000000)
+                line += "，%.2f 次/MB" % (retr / mb)
+                denom = retr + nbytes / 1460.0
+                if denom > 0:
+                    line += "，估算 %.3f%%（MSS 1460B）" % (retr * 100.0 / denom)
+            retr_rows.append([label + "重传", line])
+        if retr_rows:
+            out.append(_md_table(["方向", "重传"], retr_rows))
+            out.append("")
+        if not ts:
+            out.append("> 本次没有遥测数据。")
+            out.append("")
+        out.append("> 重传率 = 重传次数 / 传输量(MB)；百分比为按 MSS 1460B 的估算值，"
+                   "原始重传次数见逐秒明细。")
+        out.append("")
+
+    # 六、亮灭屏对比
+    out.append("## 六、亮灭屏对比")
     out.append("")
     if screen_cmp.get("available"):
         on = screen_cmp.get("on") or {}
@@ -1208,8 +1359,8 @@ def render_markdown(payload):
         out.append("> 本次未执行亮灭屏对比测试（缺少 screen_on / screen_off 数据）。")
         out.append("")
 
-    # 六、异常与提示
-    out.append("## 六、异常与提示")
+    # 七、异常与提示
+    out.append("## 七、异常与提示")
     out.append("")
     if notes:
         for n in notes:
@@ -1222,7 +1373,7 @@ def render_markdown(payload):
 
 
 def write_markdown(path, payload):
-    """写 report.md：utf-8 无 BOM，六节固定结构。"""
+    """写 report.md：utf-8 无 BOM，七节固定结构。"""
     path = os.path.abspath(str(path))
     parent = os.path.dirname(path)
     if parent:

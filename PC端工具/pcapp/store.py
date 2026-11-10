@@ -103,6 +103,7 @@ def scan_output_dir():
 
 DEFAULTS = {
     "port": 8737,
+    "iperf_port": 5201,
     "out_dir": "",
     "auto_start": True,
     "open_report_after_receive": False,

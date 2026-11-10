@@ -62,7 +62,7 @@ final class CsvExport {
         return sb.toString();
     }
 
-    /** 历史详情里只有结果包 JSON 字符串，直接从 JSON 里取逐秒行。 */
+    /** 历史详情里只有结果包 JSON 字符串，直接从 JSON 里取逐秒行（连PC 会取下载+上传两段）。 */
     static void shareJson(Context c, String label, String startedAt, String bundleJson) {
         if (c == null || bundleJson == null || bundleJson.trim().isEmpty()) {
             toast(c, "这条记录没有结果包，无法导出 CSV");
@@ -71,31 +71,42 @@ final class CsvExport {
         try {
             JSONObject o = new JSONObject(bundleJson);
             JSONArray results = o.optJSONArray("results");
-            JSONObject r0 = results == null ? null : results.optJSONObject(0);
-            JSONArray arr = r0 == null ? null : r0.optJSONArray("records");
-            if (arr == null || arr.length() == 0) {
+            if (results == null || results.length() == 0) {
                 toast(c, "这条记录没有逐秒数据，无法导出 CSV");
                 return;
             }
             StringBuilder sb = new StringBuilder();
             sb.append('\uFEFF').append(HEADER).append("\r\n");
-            for (int i = 0; i < arr.length(); i++) {
-                JSONObject r = arr.optJSONObject(i);
-                if (r == null) {
+            int rows = 0;
+            for (int k = 0; k < results.length(); k++) {
+                JSONObject r0 = results.optJSONObject(k);
+                JSONArray arr = r0 == null ? null : r0.optJSONArray("records");
+                if (arr == null) {
                     continue;
                 }
-                String retr = r.optString("retr", "");
-                String total = r.optString("total", "");
-                sb.append(row(
-                        r.optString("t", ""), r.optString("test", ""),
-                        r.optString("kind", ""), r.optString("stream", ""),
-                        fmt(r.optDouble("start", 0)), fmt(r.optDouble("elapsed", r.optDouble("end", 0))),
-                        fmt(r.optDouble("transfer", 0)), r.optString("unit", ""),
-                        fmt(r.optDouble("rate", 0)), r.optString("rate_unit", ""),
-                        retr.isEmpty() ? total : retr,
-                        emptyDash(r.optString("jitter", "")), emptyDash(r.optString("lost", "")),
-                        emptyDash(r.optString("total", "")), emptyDash(r.optString("lost_pct", "")),
-                        r.optString("role", ""))).append("\r\n");
+                for (int i = 0; i < arr.length(); i++) {
+                    JSONObject r = arr.optJSONObject(i);
+                    if (r == null) {
+                        continue;
+                    }
+                    String retr = r.optString("retr", "");
+                    String total = r.optString("total", "");
+                    sb.append(row(
+                            r.optString("t", ""), r.optString("test", ""),
+                            r.optString("kind", ""), r.optString("stream", ""),
+                            fmt(r.optDouble("start", 0)), fmt(r.optDouble("elapsed", r.optDouble("end", 0))),
+                            fmt(r.optDouble("transfer", 0)), r.optString("unit", ""),
+                            fmt(r.optDouble("rate", 0)), r.optString("rate_unit", ""),
+                            retr.isEmpty() ? total : retr,
+                            emptyDash(r.optString("jitter", "")), emptyDash(r.optString("lost", "")),
+                            emptyDash(r.optString("total", "")), emptyDash(r.optString("lost_pct", "")),
+                            r.optString("role", ""))).append("\r\n");
+                    rows++;
+                }
+            }
+            if (rows == 0) {
+                toast(c, "这条记录没有逐秒数据，无法导出 CSV");
+                return;
             }
             share(c, label, startedAt, sb.toString());
         } catch (Exception e) {

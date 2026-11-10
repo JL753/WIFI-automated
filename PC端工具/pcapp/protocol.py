@@ -11,7 +11,7 @@ API_PREFIX = "/api/v1"
 PATH_RESULTS = API_PREFIX + "/results"
 PATH_PING = API_PREFIX + "/ping"
 
-MODES = ("wifi", "hotspot", "p2p")
+MODES = ("wifi", "hotspot", "p2p", "pc")
 
 # report.py 的 Record 18 字段，顺序即 CSV 列顺序
 RECORD_FIELDS = ("t", "elapsed", "test", "kind", "stream", "start", "end",

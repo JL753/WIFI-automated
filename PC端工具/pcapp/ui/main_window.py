@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""主窗口：三个 Tab + 底部日志栏。"""
+"""主窗口：四个 Tab + 底部日志栏。"""
 
 import os
 import sys
@@ -10,6 +10,7 @@ from .. import APP_NAME, VERSION, paths, store
 from ..context import Ctx
 from .tab_receive import ReceiveTab
 from .tab_report import ReportTab
+from .tab_server import ServerTab
 from .tab_settings import SettingsTab
 from .widgets import LogView
 
@@ -51,9 +52,11 @@ class MainWindow(QtWidgets.QMainWindow):
         self.split = split
 
         self.tabs = QtWidgets.QTabWidget()
+        self.tab_server = ServerTab(self.ctx)
         self.tab_receive = ReceiveTab(self.ctx)
         self.tab_report = ReportTab(self.ctx)
         self.tab_settings = SettingsTab(self.ctx)
+        self.tabs.addTab(self.tab_server, "本机服务端")
         self.tabs.addTab(self.tab_receive, "收结果")
         self.tabs.addTab(self.tab_report, "出报告")
         self.tabs.addTab(self.tab_settings, "设置")
@@ -89,8 +92,11 @@ class MainWindow(QtWidgets.QMainWindow):
         root.addWidget(split)
 
         self.status = self.statusBar()
-        self._lbl_recv = QtWidgets.QLabel("未启动")
+        self._lbl_srv = QtWidgets.QLabel("服务端未启动")
+        self._lbl_recv = QtWidgets.QLabel("接收未启动")
         self._lbl_cnt = QtWidgets.QLabel("已收 0")
+        self.status.addWidget(self._lbl_srv)
+        self.status.addWidget(QtWidgets.QLabel("  |  "))
         self.status.addWidget(self._lbl_recv)
         self.status.addWidget(QtWidgets.QLabel("  |  "))
         self.status.addWidget(self._lbl_cnt)
@@ -123,6 +129,7 @@ class MainWindow(QtWidgets.QMainWindow):
     def _wire(self):
         self.ctx.bus.reset_layout.connect(self._reset_split)
         self.ctx.bus.received.connect(self._on_received)
+        self.ctx.bus.receiver_changed.connect(self._refresh_status)
         self.ctx.bus.failed.connect(
             lambda title, reason: QtWidgets.QMessageBox.critical(self, title, reason))
 
@@ -138,17 +145,24 @@ class MainWindow(QtWidgets.QMainWindow):
                 QtGui.QDesktopServices.openUrl(QtCore.QUrl.fromLocalFile(md))
 
     def _on_tab_changed(self, idx):
-        if idx == 1:
+        if self.tabs.currentWidget() is self.tab_report:
             self.tab_report.refresh()
         self._refresh_status()
 
     def _refresh_status(self):
+        s = self.ctx.pcserver
+        if s.running:
+            self._lbl_srv.setText("服务端运行  端口 %d" % s.port)
+            self._lbl_srv.setStyleSheet("color:#1a7f37;")
+        else:
+            self._lbl_srv.setText("服务端未启动")
+            self._lbl_srv.setStyleSheet("color:#999;")
         r = self.ctx.receiver
         if r.running:
-            self._lbl_recv.setText("正在接收  端口 %d" % r.port)
+            self._lbl_recv.setText("接收运行  端口 %d" % r.port)
             self._lbl_recv.setStyleSheet("color:#1a7f37;")
         else:
-            self._lbl_recv.setText("未启动")
+            self._lbl_recv.setText("接收未启动")
             self._lbl_recv.setStyleSheet("color:#999;")
         self._lbl_cnt.setText("已收 %d 份结果" % len(self.ctx.index))
 
@@ -163,6 +177,10 @@ class MainWindow(QtWidgets.QMainWindow):
         if self._split_timer.isActive():
             self._split_timer.stop()
         self._save_split()
+        try:
+            self.ctx.pcserver.stop()
+        except Exception:
+            pass
         try:
             self.ctx.receiver.stop()
         except Exception:

@@ -36,6 +36,19 @@ def sibling_report_path():
                         "WiFi吞吐量测试工具", "tools", "wb", "report.py")
 
 
+def pc_iperf3_path():
+    """PC 端 iperf3 可执行文件：随包一份，找不到再找同盘的 CLI/exe 目录。"""
+    candidates = [
+        os.path.join(PC_ROOT, "bin", "win", "iperf3.exe"),
+        os.path.join(os.path.dirname(PC_ROOT), "WiFi吞吐量测试工具", "bin", "win", "iperf3.exe"),
+        os.path.join(os.path.dirname(PC_ROOT), "WiFiTput", "bin", "win", "iperf3.exe"),
+    ]
+    for p in candidates:
+        if os.path.isfile(p):
+            return p
+    return ""
+
+
 def ensure_vendor_on_path():
     r"""把 vendor 插到 sys.path 最前面，返回是否成功。"""
     v = vendor_dir()

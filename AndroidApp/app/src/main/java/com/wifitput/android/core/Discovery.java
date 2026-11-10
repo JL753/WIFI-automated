@@ -26,9 +26,20 @@ public class Discovery {
         public String ip = "";
         public String label = "";
         public int port;
+        /** 对端 iperf3 版本（老对端为空）。 */
+        public String version = "";
+        /** 对端的结果接收 HTTP 端口，0 表示不接收。 */
+        public int httpPort;
+        /** "PC" / "PHONE"；老对端按 PHONE 处理。 */
+        public String kind = "PHONE";
 
         public String text() {
-            return label + "  " + ip + ":" + port;
+            return label + "  " + ip + ":" + port
+                    + (version == null || version.isEmpty() ? "" : "  " + version);
+        }
+
+        public boolean isPc() {
+            return "PC".equalsIgnoreCase(kind);
         }
     }
 
@@ -36,8 +47,18 @@ public class Discovery {
     private static DatagramSocket sock;
     private static Thread thread;
 
-    /** 开始应答广播询问。label 显示给对方看，port 是 iperf3 服务端口。 */
-    public static synchronized void startResponder(final String label, final int port) {
+    /** 手机端应答：额外带上 iperf3 版本和 PHONE 类型。 */
+    public static synchronized void startResponder(String label, int port) {
+        startResponder(label, port, "", 0, "PHONE");
+    }
+
+    /**
+     * 开始应答广播询问。label 显示给对方看，port 是 iperf3 服务端口；
+     * version/httpPort/kind 供「连PC」和 PC 工具识别。
+     */
+    public static synchronized void startResponder(final String label, final int port,
+                                                   final String version, final int httpPort,
+                                                   final String kind) {
         stopResponder();
         responding = true;
         Thread t = new Thread(new Runnable() {
@@ -64,7 +85,9 @@ public class Discovery {
                         if (!ASK.equals(msg)) {
                             continue;
                         }
-                        byte[] out = (HERE + "|" + label + "|" + port).getBytes("UTF-8");
+                        byte[] out = (HERE + "|" + safe(label) + "|" + port
+                                + "|" + safe(version) + "|" + Math.max(0, httpPort)
+                                + "|" + safe(kind)).getBytes("UTF-8");
                         try {
                             s.send(new DatagramPacket(out, out.length, p.getAddress(), p.getPort()));
                         } catch (IOException ignored) {
@@ -98,6 +121,10 @@ public class Discovery {
         return responding;
     }
 
+    private static String safe(String s) {
+        return s == null ? "" : s.replace("|", "/").replace("\n", " ").trim();
+    }
+
     /** 广播询问，收集 waitMs 内的应答。同一个 IP 只留一条。 */
     public static List<Peer> scan(int waitMs) {
         List<Peer> out = new ArrayList<Peer>();
@@ -127,7 +154,7 @@ public class Discovery {
                 if (!msg.startsWith(HERE)) {
                     continue;
                 }
-                String[] parts = (msg + "||").split("\\|");
+                String[] parts = (msg + "|||||").split("\\|");
                 Peer peer = new Peer();
                 peer.label = parts.length > 1 ? parts[1] : "对端";
                 peer.port = 5201;
@@ -135,6 +162,14 @@ public class Discovery {
                     peer.port = Integer.parseInt(parts.length > 2 ? parts[2].trim() : "5201");
                 } catch (NumberFormatException ignored) {
                 }
+                peer.version = parts.length > 3 ? parts[3].trim() : "";
+                try {
+                    peer.httpPort = parts.length > 4 ? Integer.parseInt(parts[4].trim()) : 0;
+                } catch (NumberFormatException ignored) {
+                    peer.httpPort = 0;
+                }
+                peer.kind = parts.length > 5 && !parts[5].trim().isEmpty()
+                        ? parts[5].trim() : "PHONE";
                 peer.ip = p.getAddress().getHostAddress();
                 if (!seen.containsKey(peer.ip)) {
                     seen.put(peer.ip, peer);

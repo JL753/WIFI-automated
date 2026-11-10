@@ -25,6 +25,20 @@ public class Bundle {
     public int port = 5201;
     public String udpBw = "";
 
+    /** 连PC 专用：标准报告需要的元数据。 */
+    public String testKind = "";
+    public String toolClient = "";
+    public String toolServer = "";
+    public String direction = "";
+    public String bandwidth = "";
+    public String locationPreset = "";
+    public int distanceM = -1;
+    public boolean longRun;
+    public JSONObject ping;
+    public JSONArray telemetry;
+    public JSONObject telemetrySummary;
+    public JSONObject server;
+
     public final JSONArray devices = new JSONArray();
     public final JSONArray results = new JSONArray();
     public final List<Record> records = new ArrayList<Record>();
@@ -38,6 +52,9 @@ public class Bundle {
     }
 
     public String itemId() {
+        if ("pc".equals(mode)) {
+            return "pc_tput";
+        }
         if ("hotspot".equals(mode)) {
             return "hotspot_tput";
         }
@@ -130,6 +147,26 @@ public class Bundle {
         m.put("port", port);
         m.put("udp_bw", udpBw);
         m.put("mode", mode);
+        if (!testKind.isEmpty()) {
+            m.put("test_kind", testKind);
+            m.put("duration_per_direction", duration);
+            m.put("long_run", longRun);
+        }
+        if (!toolClient.isEmpty() || !toolServer.isEmpty()) {
+            m.put("tools", new JSONObject().put("client", toolClient).put("server", toolServer));
+        }
+        if (!direction.isEmpty()) {
+            m.put("direction", direction);
+        }
+        if (!bandwidth.isEmpty()) {
+            m.put("bandwidth", bandwidth);
+        }
+        if (!locationPreset.isEmpty() || distanceM >= 0) {
+            JSONObject loc = new JSONObject();
+            loc.put("preset", locationPreset);
+            loc.put("distance_m", distanceM);
+            m.put("location", loc);
+        }
         b.put("meta", m);
         b.put("devices", devices);
         b.put("results", results);
@@ -140,6 +177,18 @@ public class Bundle {
         b.put("records", recs);
         b.put("screen", JSONObject.NULL);
         b.put("notes", notes);
+        if (ping != null) {
+            b.put("ping", ping);
+        }
+        if (telemetry != null) {
+            b.put("telemetry", telemetry);
+        }
+        if (telemetrySummary != null) {
+            b.put("telemetry_summary", telemetrySummary);
+        }
+        if (server != null) {
+            b.put("server", server);
+        }
         return b;
     }
 

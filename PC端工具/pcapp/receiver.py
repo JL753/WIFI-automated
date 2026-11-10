@@ -13,7 +13,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from . import protocol
 
-MAX_BODY = 32 * 1024 * 1024      # 一次结果包上限 32 MB，超过直接 413
+MAX_BODY = 64 * 1024 * 1024      # 一次结果包上限 64 MB；长稳包按 SUM+5s 控制，留足余量
 TIMEOUT_S = 20                    # 单连接读超时，防止半开连接把线程占住
 
 

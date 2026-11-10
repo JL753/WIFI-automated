@@ -146,7 +146,7 @@ class Session {
                     serveStartedAt = Bundle.stamp();
                     serving = true;
                     KeepAlive.start(ctx, "服务端已就绪，端口 " + port);
-                    Discovery.startResponder(label(), port);
+                    Discovery.startResponder(label(), port, Bin.version(ctx), 0, "PHONE");
                     line("--", "已开启对端发现，同网段的另一台手机能扫到你");
                     // 服务端是脱离的子进程，逐秒输出只落在日志文件里，只能轮询着读回来
                     long offset = 0;

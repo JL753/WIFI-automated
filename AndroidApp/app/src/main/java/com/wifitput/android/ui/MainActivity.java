@@ -25,11 +25,11 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 
-public class MainActivity extends Activity implements TabPanel.StatusSink {
+public class MainActivity extends Activity implements PanelHost.StatusSink {
 
     private static final int REQ_PERM = 1101;
 
-    private final List<TabPanel> panels = new ArrayList<TabPanel>();
+    private final List<PanelHost> panels = new ArrayList<PanelHost>();
     private final List<TextView> tabViews = new ArrayList<TextView>();
     private TextView status;
     private TextView runStatus;
@@ -39,7 +39,7 @@ public class MainActivity extends Activity implements TabPanel.StatusSink {
 
     /** 顶栏全局状态：哪个页签在跑、跑了多久。切页签也不丢。 */
     private final Handler ticker = new Handler(Looper.getMainLooper());
-    private TabPanel activePanel;
+    private PanelHost activePanel;
     private boolean activeClientRun;
     private final Runnable tick = new Runnable() {
         @Override
@@ -72,12 +72,14 @@ public class MainActivity extends Activity implements TabPanel.StatusSink {
         final android.widget.FrameLayout body = new android.widget.FrameLayout(this);
         body.setLayoutParams(new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f));
-        for (String mode : new String[]{"wifi", "hotspot", "p2p"}) {
-            TabPanel p = new TabPanel(this, mode);
+        for (String mode : new String[]{"wifi", "hotspot", "p2p", "pc"}) {
+            PanelHost p = "pc".equals(mode) ? new PcPanel(this) : new TabPanel(this, mode);
             p.setStatusSink(this);
-            p.setVisibility(mode.equals("wifi") ? android.view.View.VISIBLE : android.view.View.GONE);
+            android.view.View v = (android.view.View) p;
+            v.setVisibility("wifi".equals(mode)
+                    ? android.view.View.VISIBLE : android.view.View.GONE);
             panels.add(p);
-            body.addView(p, new android.widget.FrameLayout.LayoutParams(
+            body.addView(v, new android.widget.FrameLayout.LayoutParams(
                     android.widget.FrameLayout.LayoutParams.MATCH_PARENT,
                     android.widget.FrameLayout.LayoutParams.MATCH_PARENT));
         }
@@ -127,7 +129,7 @@ public class MainActivity extends Activity implements TabPanel.StatusSink {
         head.addView(status);
 
         LinearLayout tabs = Ui.row(this);
-        String[] names = {"WiFi", "热点", "P2P"};
+        String[] names = {"WiFi", "热点", "P2P", "连PC"};
         for (int i = 0; i < names.length; i++) {
             final int idx = i;
             TextView t = Ui.text(this, names[i], 14f, Color.WHITE, true);
@@ -191,7 +193,7 @@ public class MainActivity extends Activity implements TabPanel.StatusSink {
                     @Override
                     public void onClick(android.content.DialogInterface d, int which) {
                         boolean busy = false;
-                        for (TabPanel p : panels) {
+                        for (PanelHost p : panels) {
                             if (p.isBusy()) {
                                 busy = true;
                             }
@@ -204,7 +206,7 @@ public class MainActivity extends Activity implements TabPanel.StatusSink {
                         Prefs.putStr(MainActivity.this, "theme_mode", values[which]);
                         d.dismiss();
                         // 把抽屉里还没开始的参数先存下来，重建后不丢
-                        for (TabPanel p : panels) {
+                        for (PanelHost p : panels) {
                             p.persistSettings();
                         }
                         recreate();
@@ -228,7 +230,8 @@ public class MainActivity extends Activity implements TabPanel.StatusSink {
     private void select(int idx) {
         current = idx;
         for (int i = 0; i < panels.size(); i++) {
-            panels.get(i).setVisibility(i == idx ? android.view.View.VISIBLE : android.view.View.GONE);
+            ((android.view.View) panels.get(i)).setVisibility(
+                    i == idx ? android.view.View.VISIBLE : android.view.View.GONE);
         }
         paintTabs(idx);
     }
@@ -280,15 +283,15 @@ public class MainActivity extends Activity implements TabPanel.StatusSink {
     }
 
     @Override
-    public void onStatus(TabPanel p, boolean active, boolean clientRun) {
+    public void onStatus(PanelHost p, boolean active, boolean clientRun) {
         if (!active) {
             // 不是当前显示的那个页签收尾，不影响顶栏
             if (p != activePanel) {
                 return;
             }
             // 一个页签停了但另一个还在跑：接着显示另一个
-            TabPanel other = null;
-            for (TabPanel x : panels) {
+            PanelHost other = null;
+            for (PanelHost x : panels) {
                 if (x != p && x.isBusy()) {
                     other = x;
                     break;
@@ -353,7 +356,10 @@ public class MainActivity extends Activity implements TabPanel.StatusSink {
         super.onActivityResult(req, res, data);
         Qr.Peer p = QrDialog.result(req, res, data);
         if (p != null && current >= 0 && current < panels.size()) {
-            panels.get(current).onQrPeer(p);
+            PanelHost cur = panels.get(current);
+            if (cur instanceof TabPanel) {
+                ((TabPanel) cur).onQrPeer(p);
+            }
         }
     }
 
@@ -399,7 +405,7 @@ public class MainActivity extends Activity implements TabPanel.StatusSink {
         }
         // 有测试在跑时先不重建，避免把这一轮 UI 和后台 iperf 断开
         boolean busy = false;
-        for (TabPanel p : panels) {
+        for (PanelHost p : panels) {
             if (p.isBusy()) {
                 busy = true;
             }
@@ -408,7 +414,7 @@ public class MainActivity extends Activity implements TabPanel.StatusSink {
             return;
         }
         lastUiMode = mode;
-        for (TabPanel p : panels) {
+        for (PanelHost p : panels) {
             p.persistSettings();
         }
         recreate();
@@ -418,7 +424,7 @@ public class MainActivity extends Activity implements TabPanel.StatusSink {
     protected void onResume() {
         super.onResume();
         // 用户可能刚去系统设置里把热点开了又回来，回来就重新检测一遍。
-        for (TabPanel p : panels) {
+        for (PanelHost p : panels) {
             p.refreshHotspot();
         }
         refreshStatus();
@@ -435,7 +441,7 @@ public class MainActivity extends Activity implements TabPanel.StatusSink {
     @Override
     protected void onDestroy() {
         ticker.removeCallbacks(tick);
-        for (TabPanel p : panels) {
+        for (PanelHost p : panels) {
             if (!p.isBusy()) {
                 p.stopAll();
             }
@@ -446,7 +452,7 @@ public class MainActivity extends Activity implements TabPanel.StatusSink {
     @Override
     public void onBackPressed() {
         boolean busy = false;
-        for (TabPanel p : panels) {
+        for (PanelHost p : panels) {
             if (p.isBusy()) {
                 busy = true;
             }
@@ -462,7 +468,7 @@ public class MainActivity extends Activity implements TabPanel.StatusSink {
                 .setPositiveButton("退出", new android.content.DialogInterface.OnClickListener() {
                     @Override
                     public void onClick(android.content.DialogInterface d, int w) {
-                        for (TabPanel p : panels) {
+                        for (PanelHost p : panels) {
                             p.stopAll();
                         }
                         finish();

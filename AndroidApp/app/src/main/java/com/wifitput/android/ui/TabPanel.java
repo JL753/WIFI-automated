@@ -44,12 +44,7 @@ import java.util.List;
  * 角色、地址、参数、标签、热点/P2P 的细节都收进底部抽屉。三种模式共用同一套数据区，
  * 区别只在「先建哪种链路」这一张卡。
  */
-class TabPanel extends ScrollView implements Session.Listener, AddrSink {
-
-    /** 主界面顶栏的全局状态：哪个页签在跑、是打流还是当服务端。 */
-    interface StatusSink {
-        void onStatus(TabPanel p, boolean active, boolean clientRun);
-    }
+class TabPanel extends ScrollView implements PanelHost, Session.Listener, AddrSink {
 
     final String mode;
     private final Session session;
@@ -96,7 +91,7 @@ class TabPanel extends ScrollView implements Session.Listener, AddrSink {
     private HotspotBox hs;
     private P2pBox p2p;
 
-    private StatusSink sink;
+    private PanelHost.StatusSink sink;
     private boolean busy;
     private String busyText = "";
     private boolean testServer;
@@ -271,7 +266,7 @@ class TabPanel extends ScrollView implements Session.Listener, AddrSink {
         LinearLayout.LayoutParams alp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         alp.topMargin = Ui.dp(c, 10);
-        primaryBtn = Ui.primary(c, "开始打流", new View.OnClickListener() {
+        primaryBtn = Ui.primary(c, "开始测试", new View.OnClickListener() {
             @Override
             public void onClick(View v) {
                 onPrimary();
@@ -547,10 +542,10 @@ class TabPanel extends ScrollView implements Session.Listener, AddrSink {
                 secondaryBtn.setVisibility(VISIBLE);
                 nextHint.setText("→ 下一步：另一台点「当服务端」，这台点「扫描对端」");
             } else {
-                primaryBtn.setText("开始打流");
+                primaryBtn.setText("开始测试");
                 secondaryBtn.setText("重新扫描");
                 secondaryBtn.setVisibility(VISIBLE);
-                nextHint.setText("→ 下一步：点「开始打流」（对端 " + hostText + "）");
+                nextHint.setText("→ 下一步：点「开始测试」（对端 " + hostText + "）");
             }
         } else if ("hotspot".equals(mode)) {
             if (hs != null) {
@@ -580,14 +575,14 @@ class TabPanel extends ScrollView implements Session.Listener, AddrSink {
                 peerLine.setText(hostText.isEmpty()
                         ? (hotspotHost ? "本机热点已开 · 还没选对端" : "先在系统 WLAN 连上对方热点")
                         : "对端 " + hostText + ":" + portText);
-                primaryBtn.setText(hostText.isEmpty() ? "扫描对端" : "开始打流");
+                primaryBtn.setText(hostText.isEmpty() ? "扫描对端" : "开始测试");
                 secondaryBtn.setText(hostText.isEmpty()
                         ? (hotspotHost ? "手工填写" : "去 WLAN 设置") : "重新扫描");
                 secondaryBtn.setVisibility(VISIBLE);
                 nextHint.setText(hostText.isEmpty()
                         ? (hotspotHost ? "→ 下一步：扫描对端，或手工填对方的地址"
-                        : "→ 下一步：WLAN 连上对方热点 → 扫描对端 → 开始打流")
-                        : "→ 下一步：点「开始打流」（对端 " + hostText + "）");
+                        : "→ 下一步：WLAN 连上对方热点 → 扫描对端 → 开始测试")
+                        : "→ 下一步：点「开始测试」（对端 " + hostText + "）");
             }
             stepLine.setText(stepText(hotspotHost ? hotspotOn : true, hostText));
             chipsLine.setText(paramsText() + "   ·   设置 ›");
@@ -607,7 +602,7 @@ class TabPanel extends ScrollView implements Session.Listener, AddrSink {
                 nextHint.setText(!grouped
                         ? (p2pOwner ? "→ 下一步：点「我的投屏码」，另一台扫码加入"
                         : "→ 下一步：点「扫码直连」加入对方的群组")
-                        : "→ 下一步：点「当服务端」，等另一台开始打流");
+                        : "→ 下一步：点「当服务端」，等另一台开始测试");
             } else {
                 peerLine.setText(hostText.isEmpty()
                         ? (grouped ? "已组网 · 群主 " + safeIp(groupIp) : "还没组网")
@@ -619,13 +614,13 @@ class TabPanel extends ScrollView implements Session.Listener, AddrSink {
                     primaryBtn.setText("扫描对端");
                     secondaryBtn.setText("手动组网");
                 } else {
-                    primaryBtn.setText("开始打流");
+                    primaryBtn.setText("开始测试");
                     secondaryBtn.setText("重新扫描");
                 }
                 secondaryBtn.setVisibility(VISIBLE);
                 nextHint.setText(!grouped
                         ? (p2pOwner ? "→ 下一步：点「我的投屏码」，另一台扫码加入" : "→ 下一步：点「扫码直连」加入对方的群组")
-                        : (hostText.isEmpty() ? "→ 下一步：扫描对端，或从设置里手动组网" : "→ 下一步：点「开始打流」（对端 " + hostText + "）"));
+                        : (hostText.isEmpty() ? "→ 下一步：扫描对端，或从设置里手动组网" : "→ 下一步：点「开始测试」（对端 " + hostText + "）"));
             }
             stepLine.setText(stepText(grouped, hostText));
             chipsLine.setText(paramsText() + "   ·   设置 ›");
@@ -644,7 +639,7 @@ class TabPanel extends ScrollView implements Session.Listener, AddrSink {
         String link = "hotspot".equals(mode)
                 ? (hotspotHost ? "开热点" : "连热点") : "组网";
         String second = testServer ? "当服务端" : "扫描对端";
-        String third = testServer ? "对方打流" : "开始打流";
+        String third = testServer ? "对方开始" : "开始测试";
         return mark(step, 1) + "① " + link + "   "
                 + mark(step, 2) + "② " + second + "   "
                 + mark(step, 3) + "③ " + third;
@@ -1400,7 +1395,7 @@ class TabPanel extends ScrollView implements Session.Listener, AddrSink {
     }
 
     /** 换外观前把抽屉里还没开始的参数存下来，Activity 重建后不会丢。 */
-    void persistSettings() {
+    public void persistSettings() {
         if (pullParams()) {
             session.savePrefs();
             saveRoles();
@@ -1455,7 +1450,7 @@ class TabPanel extends ScrollView implements Session.Listener, AddrSink {
         renderState();
     }
 
-    void setStatusSink(StatusSink s) {
+    public void setStatusSink(PanelHost.StatusSink s) {
         sink = s;
     }
 
@@ -1465,19 +1460,19 @@ class TabPanel extends ScrollView implements Session.Listener, AddrSink {
         }
     }
 
-    boolean isBusy() {
+    public boolean isBusy() {
         return busy;
     }
 
-    boolean isClientRun() {
+    public boolean isClientRun() {
         return busy && !testServer;
     }
 
-    long runStartMs() {
+    public long runStartMs() {
         return runStartMs;
     }
 
-    String modeTitle() {
+    public String modeTitle() {
         if ("hotspot".equals(mode)) {
             return "热点吞吐";
         }
@@ -1494,7 +1489,7 @@ class TabPanel extends ScrollView implements Session.Listener, AddrSink {
         if ("p2p".equals(mode)) {
             return "两台不接路由器，用 Wi-Fi Direct 直接互联后再打流。出码这台建议当服务端。";
         }
-        return "两台手机连同一个 WiFi，一台当服务端，另一台扫描对端后开始打流。";
+        return "两台手机连同一个 WiFi，一台当服务端，另一台扫描对端后开始测试。";
     }
 
     private String kindLabel() {
@@ -1509,7 +1504,7 @@ class TabPanel extends ScrollView implements Session.Listener, AddrSink {
         return getContext();
     }
 
-    void stopAll() {
+    public void stopAll() {
         removeCallbacks(nextRepeat);
         session.stopServing();
         session.savePrefs();
@@ -1519,7 +1514,7 @@ class TabPanel extends ScrollView implements Session.Listener, AddrSink {
         }
     }
 
-    void refreshHotspot() {
+    public void refreshHotspot() {
         if (hs != null) {
             hs.refresh();
         }

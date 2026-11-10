@@ -333,7 +333,7 @@ class RateChart extends View {
         text.setTextSize(sp(10.5f));
         text.setColor(Ui.MUTED);
         text.setTextAlign(Paint.Align.CENTER);
-        c.drawText(armed ? "正在等待第一秒数据…" : "开始打流后，这里按秒画实时速率",
+        c.drawText(armed ? "正在等待第一秒数据…" : "开始测试后，这里按秒画实时速率",
                 (l + r) / 2f, (t + b) / 2f + sp(4f), text);
         text.setTextAlign(Paint.Align.LEFT);
     }

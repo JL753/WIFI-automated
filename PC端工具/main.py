@@ -1,9 +1,12 @@
 # -*- coding: utf-8 -*-
-r"""PC 端入口：双击或用 启动.bat 打开。
+r"""PC 端入口：双击 启动.bat 打开（GUI 无命令窗口）。
 
-不带参数打开界面；带 --selftest 只做离线自检并打印结果（不开窗口，
+不带参数打开界面；带 --selftest 只做离线自检并打印结果（保留控制台输出，
 适合远程或第一次安装后确认环境是否齐全）。
-r"""
+
+GUI 启动走 pythonw.exe，没有控制台，所以任何启动失败都写进
+PC端工具\启动错误.log 并尽量弹一个 Qt 提示框，避免「双击没反应」。
+"""
 
 import os
 import sys
@@ -13,9 +16,42 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 if HERE not in sys.path:
     sys.path.insert(0, HERE)
 
+ERROR_LOG = os.path.join(HERE, "启动错误.log")
+
+
+def _gui_mode():
+    """pythonw.exe 没有控制台；把输出接到日志文件，异常不会静默丢失。"""
+    if sys.stdout is not None and sys.stderr is not None:
+        return
+    try:
+        fp = open(ERROR_LOG, "a", encoding="utf-8", errors="replace")
+        if sys.stdout is None:
+            sys.stdout = fp
+        if sys.stderr is None:
+            sys.stderr = fp
+    except Exception:
+        pass
+
+
+def _log_startup_error(text):
+    """把启动失败写进日志；能用 Qt 时再弹一个可见提示。"""
+    try:
+        with open(ERROR_LOG, "a", encoding="utf-8", errors="replace") as fp:
+            fp.write(text.rstrip() + "\n")
+    except Exception:
+        pass
+    try:
+        from PySide6 import QtWidgets
+        app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+        QtWidgets.QMessageBox.critical(
+            None, "WiFiTput PC 端启动失败",
+            "程序没能启动。详细原因已写入：\n%s" % ERROR_LOG)
+    except Exception:
+        pass
+
 
 def _selftest():
-    """离线自检：只读、不联网、不开窗口。返回退出码。"""
+    """离线自检：不联网、不开窗口。返回退出码。"""
     from pcapp import paths
     ok = True
     print("源码目录    %s" % paths.root_dir())
@@ -27,7 +63,7 @@ def _selftest():
         return 2
     try:
         import PySide6
-        from PySide6 import QtCore
+        from PySide6 import QtCore, QtWidgets
         print("[OK] PySide6 %s（Qt %s）" % (PySide6.__version__, QtCore.qVersion()))
     except Exception as exc:
         print("[!!] PySide6 不可用：%s" % exc)
@@ -71,19 +107,28 @@ def _main(argv):
     from pcapp import paths
     if "--selftest" in argv or "-selftest" in argv:
         return _selftest()
+
+    _gui_mode()
+    try:
+        if os.path.isfile(ERROR_LOG):
+            os.remove(ERROR_LOG)
+    except OSError:
+        pass
     paths.ensure_vendor_on_path()
     try:
         from pcapp.ui import run
+        return run(argv)
     except ImportError as exc:
-        sys.stderr.write(
+        _log_startup_error(
             "[错误] 缺少 PySide6 界面库，无法启动。\n"
             "原因  ：%s\n"
-            "处理办法：确认 vendor 目录完整存在：%s\n" % (exc, paths.vendor_dir()))
+            "处理办法：双击 启动.bat 让它自动安装 PySide6==6.12.0 到 vendor\，"
+            "或手动执行 python -m pip install --target vendor PySide6==6.12.0\n"
+            "vendor 目录：%s\n%s" % (exc, paths.vendor_dir(), traceback.format_exc()))
         return 1
     except Exception:
-        traceback.print_exc()
+        _log_startup_error("界面启动异常：\n" + traceback.format_exc())
         return 1
-    return run(argv)
 
 
 if __name__ == "__main__":

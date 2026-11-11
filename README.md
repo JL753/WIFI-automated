@@ -59,7 +59,7 @@
 │  ├─ pcapp                receiver / reports / protocol / ui + _vendor_report.py（报告渲染）
 │  ├─ bin\win              iperf3.exe + Cygwin DLL（本机服务端用）
 │  ├─ vendor               ← 不进仓库（PySide6 约 215 MB），见「关于 PySide6」
-│  ├─ 启动.bat              设好 PYTHONPATH 后拉起 main.py
+│  ├─ 启动.bat              pythonw 无窗口启动，必要时自动装 PySide6
 │  ├─ 使用说明.md           使用与排错
 │  ├─ 协议说明.md           手机 → PC 的结果包 HTTP 协议
 │  └─ 输出                  按次建子目录的运行结果（示例目录保留）
@@ -72,14 +72,13 @@
 ## 关于 PySide6（PC端工具）
 
 `PC端工具` 的界面库 PySide6 约 **215 MB / 2624 个文件**，没有放进这个仓库。
-克隆下来之后，在 `PC端工具` 目录里装一次就行：
+双击 `PC端工具\启动.bat` 会**无命令窗口**打开界面：启动器自动挑选与依赖 ABI
+匹配的 Python，缺 `vendor\` 时联网执行一次
+`python -m pip install --target vendor PySide6==6.12.0`（只装一次，被 git 忽略）。
+也可以手动在 `PC端工具` 目录执行上面这条命令。
 
-```
-python -m pip install --target vendor PySide6==6.12.0
-```
-
-装完 `vendor\PySide6\__init__.py` 存在，`启动.bat` 就能正常拉起界面。
-没装的话 `启动.bat` 会明确报 `[ERROR] PySide6 is missing in the vendor folder.`。
+若双击后没有界面，看 `PC端工具\启动错误.log`，或跑
+`PC端工具\启动.bat --selftest` 看控制台自检输出。
 
 `PC端工具` 出报告时用随包的 `pcapp\_vendor_report.py`（原命令行版 `report.py` 的完整副本，57,372 字节）。
 代码仍会先探测同级目录里已移除的命令行版 `report.py`，找不到就自动回退到这份副本，

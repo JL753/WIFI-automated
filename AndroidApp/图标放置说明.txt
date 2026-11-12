@@ -1,0 +1,16 @@
+App 图标放置说明
+================
+
+图标 PNG 已放在 app/src/main/res/mipmap-*/ic_launcher.png（5 个密度各一张）。
+AndroidManifest.xml 已写 android:icon="@mipmap/ic_launcher"。
+
+推荐尺寸：
+    mipmap-mdpi      48 x 48
+    mipmap-hdpi      72 x 72
+    mipmap-xhdpi     96 x 96
+    mipmap-xxhdpi   144 x 144
+    mipmap-xxxhdpi  192 x 192
+
+注意：res/ 目录下只能放 .xml / .png 等合法资源文件，
+不要在这里放 .txt 说明，否则 mergeDebugResources 会失败。
+本文件放在 AndroidApp/ 根目录，不参与构建。

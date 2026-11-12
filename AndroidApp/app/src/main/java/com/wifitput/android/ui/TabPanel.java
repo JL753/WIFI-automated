@@ -108,6 +108,7 @@ class TabPanel extends ScrollView implements PanelHost, Session.Listener, AddrSi
     private List<Record> lastServerRecords = new ArrayList<Record>();
     private String lastServerAt = "";
     private boolean lastWasServer;
+    private boolean restartingServer;
     private int repeatTotal = 1;
     private int repeatIndex = 1;
     private final List<Stats> repeatStats = new ArrayList<Stats>();
@@ -174,6 +175,11 @@ class TabPanel extends ScrollView implements PanelHost, Session.Listener, AddrSi
                 if (!session.running() && !busy) {
                     startRun(1);
                 }
+            }
+
+            @Override
+            public void onServeAgain() {
+                serveAgain();
             }
 
             @Override
@@ -870,6 +876,40 @@ class TabPanel extends ScrollView implements PanelHost, Session.Listener, AddrSi
         startScan();
     }
 
+    /** 服务端结果卡的「再测一次」：沿用当前参数重新起服务端，等对端再打一轮。 */
+    private void serveAgain() {
+        if (busy || restartingServer) {
+            return;
+        }
+        if (!testServer) {
+            startRun(1);
+            return;
+        }
+        restartingServer = true;
+        resultCard.hide();
+        log.add("-- 重新当服务端，等对端再打一轮…");
+        refreshLog();
+        // stopServing() 只置 cancelled，旧 worker 靠 500ms 轮询退出；
+        // 等它退出再 startServing()，否则会被 Session.running() 挡掉。
+        postDelayed(new Runnable() {
+            @Override
+            public void run() {
+                restartingServer = false;
+                if (busy || session.running()) {
+                    return;
+                }
+                // pullParams 失败时 toggleServeStart 会直接返回，
+                // 这里补一句提示，别让界面停在「结果卡已隐藏、什么都没发生」。
+                if (!pullParams()) {
+                    log.add("!! 参数不合法，没能重新当服务端");
+                    refreshLog();
+                    return;
+                }
+                toggleServeStart();
+            }
+        }, 700);
+    }
+
     private void toggleServeStart() {
         if (!pullParams()) {
             return;
@@ -950,7 +990,8 @@ class TabPanel extends ScrollView implements PanelHost, Session.Listener, AddrSi
         if (st != null && st.hasData()) {
             lastStats = st;
             String subtitle = "服务端 · 收到 " + recs.size() + " 行逐秒数据";
-            resultCard.show(st, session.label, subtitle, "", "", false, !recs.isEmpty());
+            resultCard.show(st, session.label, subtitle, "", "", false,
+                    !recs.isEmpty(), true);
             lastShareText = Share.text(session.label, subtitle, st, "");
         } else {
             lastStats = null;

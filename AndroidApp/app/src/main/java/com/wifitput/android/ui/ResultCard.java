@@ -20,6 +20,9 @@ class ResultCard extends LinearLayout {
     interface Actions {
         void onAgain();
 
+        /** 服务端结果卡的「再测一次」：重新起服务端等下一轮。 */
+        void onServeAgain();
+
         void onRepeat();
 
         void onShare();
@@ -148,7 +151,11 @@ class ResultCard extends LinearLayout {
             @Override
             public void onClick(View v) {
                 if (actions != null) {
-                    actions.onAgain();
+                    if (Boolean.TRUE.equals(v.getTag())) {
+                        actions.onServeAgain();
+                    } else {
+                        actions.onAgain();
+                    }
                 }
             }
         });
@@ -201,10 +208,16 @@ class ResultCard extends LinearLayout {
 
     /**
      * 展示一次结果。label 可为空；subtitle 是时间 + 参数；compare/aggregate 为空则不显示。
-     * canRepeat=false 时隐藏复测按钮（服务端没有「再打一次」的概念）。
+     * canRepeat=false 时隐藏「连测 3 次」；serveAgain=true 时把「再测一次」接到服务端重启。
      */
     void show(Stats st, String label, String subtitle, String compareText,
               String aggregateText, boolean canRepeat, boolean canExport) {
+        show(st, label, subtitle, compareText, aggregateText, canRepeat, canExport, false);
+    }
+
+    void show(Stats st, String label, String subtitle, String compareText,
+              String aggregateText, boolean canRepeat, boolean canExport,
+              boolean serveAgain) {
         if (st == null) {
             hide();
             return;
@@ -240,7 +253,15 @@ class ResultCard extends LinearLayout {
         aggregate.setText(aggregateText == null ? "" : aggregateText);
         aggregate.setVisibility(aggregateText == null || aggregateText.isEmpty() ? GONE : VISIBLE);
 
-        topRow.setVisibility(canRepeat ? VISIBLE : GONE);
+        topRow.setVisibility(canRepeat || serveAgain ? VISIBLE : GONE);
+        repeat.setVisibility(canRepeat ? VISIBLE : GONE);
+        again.setText(serveAgain ? "再测一次（重新当服务端）" : "再测一次");
+        again.setTag(serveAgain ? Boolean.TRUE : null);
+        // 服务端没有「连测 3 次」，让「再测一次」占满整行，别留半截空位
+        LinearLayout.LayoutParams lp = (LinearLayout.LayoutParams) again.getLayoutParams();
+        lp.weight = serveAgain && !canRepeat ? 1f : 1.25f;
+        again.setLayoutParams(lp);
+        Ui.margin(getContext(), again, 0, 0, canRepeat ? 7 : 0, 0);
         csv.setVisibility(canExport ? VISIBLE : GONE);
 
         setVisibility(VISIBLE);

@@ -6,12 +6,10 @@
 | --- | --- | --- | --- |
 | [`AndroidApp`](AndroidApp) | 手机 App（Android），双机互打流 WiFi / 热点 / P2P + 一台手机对着 PC 的「连PC」模式；控制台式界面、深色模式、历史对比、CSV 导出 | 两台 Android 手机 | 装 `AndroidApp/APK/WiFiTput.apk` |
 | [`PC端工具`](PC端工具) | PC 端接收器 + 「本机服务端」（给连PC 模式一键起 iperf3）；收手机推来的结果，落盘 CSV/JSON/MD 并直接看报告 | Windows + Python 3.8+ | PySide6（需自行安装，见下） |
+<img width="423" height="927" alt="aaa353b7-cb39-47a7-81e8-750597d67890" src="https://github.com/user-attachments/assets/469f6af0-7fde-43d8-805e-80767eafd288" />
+<img width="421" height="930" alt="4db9909c-6f5b-4060-a800-b09e675478a3" src="https://github.com/user-attachments/assets/4b90bd0e-1a5b-481b-81ee-28b97bda81cd" />
+<img width="1072" height="746" alt="image" src="https://github.com/user-attachments/assets/3e2028e5-97a1-4064-bbef-0e4af3a77dcb" />
 
-<img width="226" height="495" alt="image" src="https://github.com/user-attachments/assets/7223bb1f-cd9a-429f-b07d-32a1b380c647" />
-<img width="230" height="491" alt="image" src="https://github.com/user-attachments/assets/db0c1ac2-a9c0-4a68-a1aa-e38c6785d3a1" />
-<img width="224" height="494" alt="image" src="https://github.com/user-attachments/assets/575f873c-bbee-45f2-ad7d-dd93006391e6" />
-<img width="223" height="492" alt="image" src="https://github.com/user-attachments/assets/f5570ccc-a9e4-4b86-b73f-54469b367734" />
-<img width="577" height="347" alt="image" src="https://github.com/user-attachments/assets/7bcbfbaa-0a8c-44c2-84b7-a09ee3a8d7a2" />
 
 ---
 

@@ -6,6 +6,7 @@
 | --- | --- | --- | --- |
 | [`AndroidApp`](AndroidApp) | 手机 App（Android），双机互打流 WiFi / 热点 / P2P + 一台手机对着 PC 的「连PC」模式；控制台式界面、深色模式、历史对比、CSV 导出 | 两台 Android 手机 | 装 `AndroidApp/APK/WiFiTput.apk` |
 | [`PC端工具`](PC端工具) | PC 端接收器 + 「本机服务端」（给连PC 模式一键起 iperf3）；收手机推来的结果，落盘 CSV/JSON/MD 并直接看报告 | Windows + Python 3.8+ | PySide6（需自行安装，见下） |
+<img width="1070" height="740" alt="image" src="https://github.com/user-attachments/assets/197a3744-6aa0-426d-ab75-47daffcd196e" />
 
 
 
